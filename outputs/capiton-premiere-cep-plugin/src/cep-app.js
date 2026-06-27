@@ -768,7 +768,7 @@
           els.settingsEngineStatus.textContent = "Bağlı değil";
         }
         if (els.settingsEngineDetails) {
-          els.settingsEngineDetails.textContent = result.message || "Capiton yerel motoruna ulaşılamadı.";
+          els.settingsEngineDetails.textContent = result.message || "Zola Caption yerel motoruna ulaşılamadı.";
         }
         if (els.settingsGoogleStatus) {
           els.settingsGoogleStatus.textContent = "Okunamadı";
@@ -1550,7 +1550,7 @@
         return;
       }
 
-      writeLog(sourceResult.message + "\nCapiton yerel motora gönderiliyor...");
+      writeLog(sourceResult.message + "\nZola Caption yerel motora gönderiliyor...");
       callEngine("/transcribe", {
         mediaPath: sourceResult.mediaPath,
         language: state.detectedLanguage ? state.detectedLanguage.code : els.languageMode.value || "auto",
@@ -1723,7 +1723,7 @@
       } catch (error) {
         callback({
           ok: false,
-          message: "Capiton yerel motor cevabı okunamadı. Motor çalışıyor mu? " + error.message
+          message: "Zola Caption yerel motor cevabı okunamadı. Motor çalışıyor mu? " + error.message
         });
       }
     };
@@ -1731,7 +1731,7 @@
       callback({
         ok: false,
         message:
-          "Capiton yerel motora bağlanılamadı. Önce outputs/capiton-local-engine/server.js çalışmalı ve Whisper kurulmalı."
+          "Zola Caption yerel motora bağlanılamadı. Önce outputs/capiton-local-engine/server.js çalışmalı ve Whisper kurulmalı."
       });
     };
     xhr.send(JSON.stringify(payload));
@@ -1751,7 +1751,7 @@
       }
     };
     xhr.onerror = function () {
-      callback({ ok: false, message: "Capiton yerel motoruna bağlanılamadı." });
+      callback({ ok: false, message: "Zola Caption yerel motoruna bağlanılamadı." });
     };
     xhr.send();
   }
@@ -1966,7 +1966,7 @@
     var url = URL.createObjectURL(blob);
     var link = document.createElement("a");
     link.href = url;
-    link.download = "capiton-" + state.scenario.id + ".srt";
+    link.download = "zola-caption-" + state.scenario.id + ".srt";
     link.click();
     URL.revokeObjectURL(url);
     writeLog("SRT dışa aktarma hazırlandı.");

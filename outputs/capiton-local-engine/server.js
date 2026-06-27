@@ -31,7 +31,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && req.url === "/health") {
       sendJson(res, 200, {
         ok: true,
-        name: "Capiton Local Engine",
+        name: "Zola Caption Local Engine",
         port: PORT,
         whisper: findWhisperCli(),
         ffmpeg: findExecutable([path.join(ROOT, "bin", "ffmpeg"), "ffmpeg", "/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"]),
@@ -70,7 +70,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, "127.0.0.1", () => {
-  console.log(`Capiton Local Engine listening on http://127.0.0.1:${PORT}`);
+  console.log(`Zola Caption Local Engine listening on http://127.0.0.1:${PORT}`);
 });
 
 function loadEnvFile(filePath) {

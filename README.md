@@ -1,4 +1,4 @@
-# Capiton
+# Zola Caption
 
 Zola Dijital icin Premiere Pro altyazi paneli.
 
@@ -10,7 +10,7 @@ Zola Dijital icin Premiere Pro altyazi paneli.
 
 ## GitHub Beta Update Akisi
 
-1. GitHub'da `galipcandmr/capiton` gibi private bir repo ac.
+1. GitHub'da `galipcandmr/Zola_Caption` reposunu ac.
 2. Bu klasoru git repo yap ve remote olarak GitHub reposuna bagla.
 3. Her beta surumde `scripts/package-release.sh 0.5.34` ile paket olustur.
 4. Zip dosyasini GitHub Releases altina yukle.
@@ -26,7 +26,7 @@ Panel su semayi okur:
   "latest": "0.5.34",
   "minSupported": "0.5.30",
   "mandatory": false,
-  "downloadUrl": "https://github.com/galipcandmr/capiton/releases/download/v0.5.34/Capiton-v0.5.34.zip",
+  "downloadUrl": "https://github.com/galipcandmr/Zola_Caption/releases/download/v0.5.34/Zola-Caption-v0.5.34.zip",
   "notes": [
     "Beta guncelleme kontrol ekrani eklendi."
   ]
@@ -53,5 +53,5 @@ scripts/package-release.sh 0.5.33
 Cikti:
 
 ```text
-dist/Capiton-v0.5.33.zip
+dist/Zola-Caption-v0.5.33.zip
 ```

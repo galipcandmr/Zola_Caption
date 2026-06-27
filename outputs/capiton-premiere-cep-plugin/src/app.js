@@ -94,7 +94,7 @@ function renderAll() {
   renderAudioState();
   renderPresetPreview();
   const runtime = getRuntimeInfo();
-  writeLog(`Capiton hazır. Çalışma modu: ${runtime.mode}.`);
+  writeLog(`Zola Caption hazır. Çalışma modu: ${runtime.mode}.`);
 }
 
 function renderScenarios() {
@@ -372,7 +372,7 @@ function exportSrt() {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `capiton-${state.scenario.id}.srt`;
+  link.download = `zola-caption-${state.scenario.id}.srt`;
   link.click();
   URL.revokeObjectURL(url);
   writeLog("SRT dışa aktarma hazırlandı.");

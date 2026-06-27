@@ -37,4 +37,4 @@ if [ ! -f "$ROOT/models/ggml-small.bin" ]; then
   cp "$BUILD_DIR/models/ggml-small.bin" "$ROOT/models/ggml-small.bin"
 fi
 
-echo "Capiton local whisper hazır."
+echo "Zola Caption local whisper hazır."

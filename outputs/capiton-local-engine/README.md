@@ -1,4 +1,4 @@
-# Capiton Local Engine
+# Zola Caption Local Engine
 
 Premiere panelinin localhost üzerinden konuşacağı offline transkripsiyon motoru.
 

@@ -3,7 +3,7 @@
   Version="7.0"
   ExtensionBundleId="com.zoladijital.capiton"
   ExtensionBundleVersion="0.5.33"
-  ExtensionBundleName="Capiton"
+  ExtensionBundleName="Zola Caption"
   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <ExtensionList>
     <Extension Id="com.zoladijital.capiton.panel" Version="0.5.33"/>
@@ -35,7 +35,7 @@
         </Lifecycle>
         <UI>
           <Type>Panel</Type>
-          <Menu>Capiton</Menu>
+          <Menu>Zola Caption</Menu>
           <Geometry>
             <Size>
               <Width>1180</Width>

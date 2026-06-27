@@ -1,4 +1,4 @@
-# Capiton CEP Test Paketi
+# Zola Caption CEP Test Paketi
 
 UXP Developer Tool kurulamıyorsa bu paketi Premiere'in Legacy Extension sistemiyle test edebilirsin.
 
@@ -24,9 +24,9 @@ UXP Developer Tool kurulamıyorsa bu paketi Premiere'in Legacy Extension sistemi
 5. Premiere'i aç.
 6. Menüden şuraya bak:
 
-   `Window > Extensions > Capiton`
+   `Window > Extensions > Zola Caption`
 
-Bazı Premiere sürümlerinde menü adı `Window > Extensions (Legacy) > Capiton` olabilir.
+Bazı Premiere sürümlerinde menü adı `Window > Extensions (Legacy) > Zola Caption` olabilir.
 
 ## Test akışı
 
