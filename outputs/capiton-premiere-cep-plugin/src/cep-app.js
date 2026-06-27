@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  var CURRENT_VERSION = "v0.5.33";
+  var CURRENT_VERSION = "v0.5.35";
 
   var scenarios = [
     {
@@ -833,6 +833,7 @@
       minSupported: normalizeVersion(info.minSupported || ""),
       mandatory: !!info.mandatory,
       downloadUrl: String(info.downloadUrl || ""),
+      installMode: String(info.installMode || "engine"),
       notes: Array.isArray(info.notes) ? info.notes : []
     };
   }
@@ -915,12 +916,51 @@
       return;
     }
     closeUpdateModal();
-    if (window.cep && window.cep.util && typeof window.cep.util.openURLInDefaultBrowser === "function") {
-      window.cep.util.openURLInDefaultBrowser(info.downloadUrl);
-    } else {
-      window.open(info.downloadUrl, "_blank");
+    if (els.settingsInstallUpdateBtn) {
+      els.settingsInstallUpdateBtn.disabled = true;
+      els.settingsInstallUpdateBtn.textContent = "Yükleniyor";
     }
-    writeLog("Güncelleme paketi açılıyor: v" + info.latest + ". Premiere'i kapatıp güncelleme paketini çalıştır.");
+    writeLog("Güncelleme indiriliyor ve kuruluyor: v" + info.latest + ". Lütfen işlem bitene kadar Premiere'i kapatma.");
+
+    callEngine(
+      "/install-update",
+      {
+        version: info.latest,
+        downloadUrl: info.downloadUrl,
+        extensionPath: getExtensionRootPath()
+      },
+      function (result) {
+        if (els.settingsInstallUpdateBtn) {
+          els.settingsInstallUpdateBtn.disabled = false;
+          els.settingsInstallUpdateBtn.textContent = "Güncellemeyi yükle";
+        }
+        if (!result.ok) {
+          writeLog(result.message || "Güncelleme otomatik kurulamadı.");
+          if (window.cep && window.cep.util && typeof window.cep.util.openURLInDefaultBrowser === "function") {
+            writeLog("Manuel paket adresi açılıyor. Otomatik kurulum için yerel motor açık olmalı.");
+            window.cep.util.openURLInDefaultBrowser(info.downloadUrl);
+          }
+          return;
+        }
+
+        writeLog(
+          (result.message || "Güncelleme kuruldu.") +
+            "\nPanel: " +
+            (result.cepTarget || "-") +
+            "\nMotor: " +
+            (result.engineTarget || "-")
+        );
+        if (els.settingsUpdateStatus) {
+          els.settingsUpdateStatus.textContent = "Kuruldu";
+        }
+        if (els.settingsUpdateDetails) {
+          els.settingsUpdateDetails.textContent = "Premiere Pro'yu kapatıp yeniden açınca yeni sürüm aktif olacak.";
+        }
+        if (els.updateBadge) {
+          els.updateBadge.hidden = true;
+        }
+      }
+    );
   }
 
   function shouldShowUpdateModal(info) {

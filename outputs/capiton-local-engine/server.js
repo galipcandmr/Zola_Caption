@@ -63,6 +63,13 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === "POST" && req.url === "/install-update") {
+      const body = await readJson(req);
+      const result = await installUpdatePackage(body);
+      sendJson(res, result.ok ? 200 : 422, result);
+      return;
+    }
+
     sendJson(res, 404, { ok: false, message: "Endpoint bulunamadı." });
   } catch (error) {
     sendJson(res, 500, { ok: false, message: error.message || String(error) });
@@ -375,6 +382,213 @@ function decodeHtmlEntities(value) {
 
 function normalizeSubtitleText(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+async function installUpdatePackage(body) {
+  const info = body || {};
+  const downloadUrl = String(info.downloadUrl || "").trim();
+  const version = String(info.version || info.latest || "").replace(/^v/i, "").trim();
+  const extensionPath = String(info.extensionPath || "").trim();
+
+  if (!downloadUrl || !/^https:\/\/github\.com\/galipcandmr\/Zola_Caption\/releases\/download\//.test(downloadUrl)) {
+    return {
+      ok: false,
+      code: "INVALID_UPDATE_URL",
+      message: "Güncelleme adresi güvenli Zola Caption GitHub release adresi değil."
+    };
+  }
+
+  const jobId = `${Date.now()}-${Math.round(Math.random() * 1000000)}`;
+  const updateDir = path.join(os.tmpdir(), `zola-caption-update-${jobId}`);
+  const zipPath = path.join(updateDir, "update.zip");
+  fs.mkdirSync(updateDir, { recursive: true });
+
+  try {
+    await downloadFile(downloadUrl, zipPath);
+    await unzipFile(zipPath, updateDir);
+
+    const packageRoot = findUpdatePackageRoot(updateDir);
+    const cepSource = path.join(packageRoot, "capiton-premiere-cep-plugin");
+    const engineSource = path.join(packageRoot, "capiton-local-engine");
+
+    if (!fs.existsSync(cepSource) || !fs.existsSync(engineSource)) {
+      return {
+        ok: false,
+        code: "INVALID_UPDATE_PACKAGE",
+        message: "Güncelleme paketi beklenen Zola Caption klasörlerini içermiyor."
+      };
+    }
+
+    const cepTarget = extensionPath || defaultCepExtensionPath();
+    const engineTarget = ROOT;
+    copyDirectory(cepSource, cepTarget, {
+      removeTarget: true,
+      preserveNames: new Set()
+    });
+    copyDirectory(engineSource, engineTarget, {
+      removeTarget: false,
+      preserveNames: new Set([".env", "work"])
+    });
+    installLaunchAgent(engineTarget);
+
+    return {
+      ok: true,
+      version,
+      cepTarget,
+      engineTarget,
+      message:
+        "Zola Caption güncellendi. Değişikliğin tamamen yansıması için Premiere Pro'yu kapatıp yeniden aç."
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      code: "UPDATE_INSTALL_FAILED",
+      message: "Güncelleme yüklenemedi: " + (error.message || String(error))
+    };
+  }
+}
+
+function defaultCepExtensionPath() {
+  return path.join(os.homedir(), "Library", "Application Support", "Adobe", "CEP", "extensions", "com.zoladijital.capiton.panel");
+}
+
+function downloadFile(url, targetPath) {
+  return new Promise((resolve, reject) => {
+    const file = fs.createWriteStream(targetPath);
+    const request = https.get(url, (response) => {
+      if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+        file.close(() => {
+          fs.unlink(targetPath, () => {
+            downloadFile(response.headers.location, targetPath).then(resolve, reject);
+          });
+        });
+        return;
+      }
+
+      if (response.statusCode !== 200) {
+        file.close(() => {
+          fs.unlink(targetPath, () => {
+            reject(new Error(`Release paketi indirilemedi: HTTP ${response.statusCode}`));
+          });
+        });
+        return;
+      }
+
+      response.pipe(file);
+      file.on("finish", () => {
+        file.close(resolve);
+      });
+    });
+    request.setTimeout(120000, () => {
+      request.destroy(new Error("Güncelleme indirme zaman aşımına uğradı."));
+    });
+    request.on("error", (error) => {
+      file.close(() => {
+        fs.unlink(targetPath, () => reject(error));
+      });
+    });
+  });
+}
+
+async function unzipFile(zipPath, targetDir) {
+  const unzip = findExecutable(["/usr/bin/unzip", "unzip"]);
+  if (!unzip) {
+    throw new Error("macOS unzip bulunamadı.");
+  }
+  await run(unzip, ["-q", "-o", zipPath, "-d", targetDir]);
+}
+
+function findUpdatePackageRoot(updateDir) {
+  const entries = fs.readdirSync(updateDir).map((name) => path.join(updateDir, name));
+  for (const entry of entries) {
+    if (!fs.statSync(entry).isDirectory()) {
+      continue;
+    }
+    if (
+      fs.existsSync(path.join(entry, "capiton-premiere-cep-plugin")) &&
+      fs.existsSync(path.join(entry, "capiton-local-engine"))
+    ) {
+      return entry;
+    }
+  }
+  throw new Error("Güncelleme paketi kök klasörü bulunamadı.");
+}
+
+function copyDirectory(source, target, options = {}) {
+  const preserveNames = options.preserveNames || new Set();
+  if (options.removeTarget && fs.existsSync(target)) {
+    fs.rmSync(target, { recursive: true, force: true });
+  }
+  fs.mkdirSync(target, { recursive: true });
+  for (const name of fs.readdirSync(source)) {
+    if (name === ".DS_Store" || preserveNames.has(name)) {
+      continue;
+    }
+    const sourcePath = path.join(source, name);
+    const targetPath = path.join(target, name);
+    const stat = fs.statSync(sourcePath);
+    if (stat.isDirectory()) {
+      if (fs.existsSync(targetPath) && !fs.statSync(targetPath).isDirectory()) {
+        fs.rmSync(targetPath, { force: true });
+      }
+      copyDirectory(sourcePath, targetPath, { preserveNames });
+    } else {
+      fs.copyFileSync(sourcePath, targetPath);
+      fs.chmodSync(targetPath, stat.mode);
+    }
+  }
+}
+
+function installLaunchAgent(engineTarget) {
+  const nodePath = process.execPath || findExecutable(["node", "/opt/homebrew/bin/node", "/usr/local/bin/node"]);
+  const launchAgentsDir = path.join(os.homedir(), "Library", "LaunchAgents");
+  const plistPath = path.join(launchAgentsDir, "com.zoladijital.capiton.engine.plist");
+  const plist = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.zoladijital.capiton.engine</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>${xmlEscape(nodePath)}</string>
+    <string>${xmlEscape(path.join(engineTarget, "server.js"))}</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>${xmlEscape(engineTarget)}</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/tmp/zola-caption-engine.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/zola-caption-engine.err.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>CAPITON_ENGINE_PORT</key>
+    <string>17771</string>
+  </dict>
+</dict>
+</plist>
+`;
+  fs.mkdirSync(launchAgentsDir, { recursive: true });
+  fs.writeFileSync(plistPath, plist, "utf8");
+  const launchctl = findExecutable(["/bin/launchctl", "launchctl"]);
+  if (launchctl) {
+    spawn(launchctl, ["bootout", `gui/${process.getuid()}`, plistPath], { stdio: "ignore" }).on("close", () => {
+      spawn(launchctl, ["bootstrap", `gui/${process.getuid()}`, plistPath], { stdio: "ignore" });
+    });
+  }
+}
+
+function xmlEscape(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function normalizeTranslationSourceLanguage(language) {
