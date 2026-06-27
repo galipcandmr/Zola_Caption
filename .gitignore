@@ -1,0 +1,28 @@
+.DS_Store
+Support/
+
+# Local secrets
+outputs/capiton-local-engine/.env
+*.env
+
+# Runtime scratch/output
+outputs/capiton-local-engine/work/
+outputs/capiton-local-engine/*.log
+outputs/capiton-local-engine/.env.example.swp
+outputs/capiton-local-engine/**/__pycache__/
+outputs/capiton-local-engine/**/*.pyc
+
+# Release artifacts
+dist/
+*.zip
+
+# Large local binaries/models should be distributed through releases, not normal commits.
+outputs/capiton-local-engine/bin/
+outputs/capiton-local-engine/models/*.bin
+outputs/capiton-local-engine/models/
+outputs/capiton-local-engine/tools/
+outputs/capiton-local-engine/tools/*.tar.gz
+outputs/capiton-local-engine/vendor/
+
+# Old non-CEP prototype kept locally for reference.
+outputs/capiton-premiere-plugin/

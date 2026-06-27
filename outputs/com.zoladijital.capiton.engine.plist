@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.zoladijital.capiton.engine</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/zoladijital/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node</string>
+    <string>/Users/zoladijital/Documents/Codex/2026-06-18/premier-proda-eklenti-yani-plugin-yapabiliyormusun/outputs/capiton-local-engine/server.js</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/zoladijital/Documents/Codex/2026-06-18/premier-proda-eklenti-yani-plugin-yapabiliyormusun/outputs/capiton-local-engine</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/tmp/capiton-local-engine.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/capiton-local-engine.err.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>CAPITON_ENGINE_PORT</key>
+    <string>17771</string>
+  </dict>
+</dict>
+</plist>

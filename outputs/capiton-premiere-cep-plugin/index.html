@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Capiton</title>
+    <link rel="stylesheet" href="./styles.css?v=0.5.33">
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <img src="./assets/brand/zolalogo.png" alt="Zoladijital" class="brand-logo">
+          <div class="brand-copy">
+            <span>v0.5.33</span>
+          </div>
+        </div>
+
+        <nav class="top-tabs" aria-label="Capiton sekmeleri">
+          <button class="top-tab" type="button" data-mode-target="setup">Hazırla</button>
+          <button class="top-tab active" type="button" data-mode-target="edit">Altyazıyı düzenle</button>
+        </nav>
+
+        <div class="top-actions">
+          <button class="icon-button" id="settingsBtn" type="button" title="Ayarlar" aria-label="Ayarlar">⚙<span class="update-badge" id="updateBadge" hidden>1</span></button>
+          <button class="ghost" id="importBtn">SRT içe aktar</button>
+        </div>
+      </header>
+
+      <main class="setup-screen" id="setupView">
+        <section class="setup-card">
+          <h1>Altyazı oluştur</h1>
+          <div class="setup-row">
+            <label>
+              Sekans
+              <select>
+                <option>Tüm sekans</option>
+              </select>
+            </label>
+            <label>
+              Konuşma dili
+              <select id="languageMode">
+                <option value="auto">Dili otomatik seç</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="setting-line align-top">
+            <span>Ses kanalı</span>
+            <label class="check-chip">
+              <select id="audioTrackSelect">
+                <option value="">Ses kanalları okunuyor</option>
+              </select>
+            </label>
+            <button class="ghost compact-action" id="reloadTracksBtn" type="button">Yenile</button>
+          </div>
+
+          <label class="field-label hidden-field">
+            Algılanan dil
+            <input id="detectedLanguageInput" type="text" value="Henüz algılanmadı" readonly>
+          </label>
+
+          <label class="script-box">
+            Hazır metin
+            <textarea placeholder="Hazır metin varsa buraya yapıştır"></textarea>
+          </label>
+
+          <div class="setup-actions">
+            <div>
+              <span id="audioStatus">Sekanstaki ses kanalları otomatik okunuyor.</span>
+              <span class="subtle" id="setupCost">Lokal Whisper ile transkripsiyon maliyeti $0.</span>
+            </div>
+            <button class="primary" id="transcribeTimelineBtn">Altyazı üret</button>
+          </div>
+        </section>
+
+        <section class="engine-card">
+          <div class="section-title">Motor</div>
+          <label class="field-label" for="speechProvider">Transkripsiyon</label>
+          <select id="speechProvider">
+            <option value="local-whisper">Lokal Whisper</option>
+            <option value="openai-whisper">OpenAI Whisper / gerçek zamanlı</option>
+            <option value="premiere-native">Premiere yerel transkript</option>
+            <option value="manual-srt">Hazır SRT/VTT</option>
+          </select>
+          <label class="field-label" for="outputModeInput">Zaman çizelgesine gönderme şekli</label>
+          <select id="outputModeInput">
+            <option value="mogrt">Animasyonlu altyazı</option>
+            <option value="overlay">Render edilmiş altyazı</option>
+            <option value="srt">Premiere altyazısı</option>
+          </select>
+          <div class="cost-grid">
+            <label>
+              <span>Dakika</span>
+              <input id="durationInput" type="number" min="1" value="30">
+            </label>
+            <label>
+              <span>Karakter</span>
+              <input id="charInput" type="number" min="0" value="18000">
+            </label>
+          </div>
+          <div class="cost-card" id="costCard"></div>
+        </section>
+      </main>
+
+      <main class="analyzing-screen" id="analyzingView" hidden>
+        <div class="progress-card">
+          <h2>Bu işlem yaklaşık birkaç dakika sürebilir</h2>
+          <div class="progress-track"><span></span></div>
+          <p id="analyzingLabel">Video sesi analiz ediliyor</p>
+        </div>
+      </main>
+
+      <main class="edit-screen" id="editView" hidden>
+        <section class="caption-workbench">
+          <div class="caption-head">
+            <div>
+              <h1 id="sequenceTitle">Altyazı düzenleme</h1>
+              <span id="captionMeta">0 blok</span>
+            </div>
+            <div class="caption-tools">
+              <select id="translateTargetInput" class="mini-select" aria-label="Altyazıyı çevir">
+                <option value="none">Altyazıyı çevir</option>
+              </select>
+              <button id="exportBtn" class="ghost">SRT dışa aktar</button>
+            </div>
+          </div>
+
+          <div class="caption-table cutback-list" id="captionTable"></div>
+
+          <div class="edit-footer">
+            <div class="footer-actions">
+              <button class="ghost" id="applyBtn" type="button">Düzenlemeyi güncelle</button>
+              <button class="primary" id="reapplyBtn" type="button">Yeniden üret ve bas</button>
+            </div>
+          </div>
+        </section>
+
+        <aside class="animated-drawer" id="animatedDrawer">
+          <div class="drawer-head">
+            <h2>Animasyonlu altyazı</h2>
+          </div>
+
+          <div class="style-tabs" role="tablist">
+            <button class="style-tab active" type="button" data-style-tab="preset">Hazır stil</button>
+            <button class="style-tab" type="button" data-style-tab="general">Genel</button>
+            <button class="style-tab" type="button" data-style-tab="caption">Altyazı</button>
+            <button class="style-tab" type="button" data-style-tab="style">Stil</button>
+          </div>
+
+          <section class="style-panel-content active" data-style-panel="preset">
+            <label class="search-field">
+              <span>Ara</span>
+              <input id="presetSearchInput" type="search" placeholder="Stil ara">
+            </label>
+            <div class="preset-toolbar">
+              <select>
+                <option>Ad</option>
+              </select>
+              <button class="ghost" type="button">Tümünü kapat</button>
+              <button class="ghost" id="newTemplateBtn" type="button">+</button>
+            </div>
+            <div class="template-group-title">Hazır stiller <span id="presetCount">0</span></div>
+            <div class="preset-list" id="presetList"></div>
+          </section>
+
+          <section class="style-panel-content" data-style-panel="general">
+            <label class="field-label">
+              Önizleme metni
+              <select id="previewTextSelect"></select>
+            </label>
+            <button class="ghost full" id="previewCurrentFrameBtn" type="button">Geçerli karede önizle</button>
+            <label class="toggle-row">
+              <span>Kısa video güvenli alanı</span>
+              <input id="screenGuideInput" type="checkbox">
+            </label>
+            <div class="position-editor">
+              <div class="position-map">
+                <span></span><strong></strong><span></span>
+              </div>
+              <label>X <input id="positionXInput" type="number" value="0"></label>
+              <label>Y <input id="positionYInput" type="number" value="76"></label>
+            </div>
+            <div class="split-fields">
+              <label>Sol boşluk <input id="paddingLeftInput" type="number" value="40"></label>
+              <label>Sağ boşluk <input id="paddingRightInput" type="number" value="40"></label>
+            </div>
+            <label class="field-label">
+              Ölçek
+              <input id="scaleInput" type="range" min="0.6" max="1.8" step="0.05" value="1">
+            </label>
+          </section>
+
+          <section class="style-panel-content" data-style-panel="caption">
+            <div class="section-title">Satırdaki maksimum uzunluk</div>
+            <div class="radio-row">
+              <label><input name="lineLengthMode" type="radio" value="letter">Harf sayısı</label>
+              <label><input name="lineLengthMode" type="radio" value="word" checked>Kelime sayısı</label>
+            </div>
+            <input id="wordsPerScreenInput" type="number" min="1" max="6" step="1" value="3">
+            <div class="punctuation-list">
+              <label><span>. Nokta</span><input id="breakPeriodInput" type="checkbox"></label>
+              <label><span>, Virgül</span><input id="breakCommaInput" type="checkbox"></label>
+              <label><span>? Soru işareti</span><input id="breakQuestionInput" type="checkbox" checked></label>
+              <label><span>! Ünlem</span><input id="breakExclamationInput" type="checkbox"></label>
+              <label><span>Çift satır kullan</span><input id="multiLineInput" type="checkbox"></label>
+            </div>
+            <label class="field-label">
+              Harf biçimi
+              <select id="letterCaseInput">
+                <option value="as-typed">Yazıldığı gibi</option>
+                <option value="uppercase">BÜYÜK HARF</option>
+                <option value="lowercase">küçük harf</option>
+                <option value="title">Baş harfler büyük</option>
+              </select>
+            </label>
+            <label class="field-label">
+              Sessiz bölüm
+              <select id="silentSectionInput">
+                <option value="sustain">Altyazıyı ekranda tut</option>
+                <option value="hide">Altyazıyı gizle</option>
+              </select>
+            </label>
+          </section>
+
+          <section class="style-panel-content" data-style-panel="style">
+            <label class="field-label">
+              Yazı tipi
+              <input id="fontInput" type="text" value="Inter">
+            </label>
+            <div class="split-fields">
+              <label>Yazı boyutu <input id="fontSizeInput" type="number" min="24" max="160" step="1" value="56"></label>
+              <label>Ana renk <input id="primaryColorInput" type="color" value="#ffffff"></label>
+            </div>
+            <div class="split-fields">
+              <label>Vurgu rengi <input id="accentColorInput" type="color" value="#fff200"></label>
+              <label>Kontur rengi <input id="strokeColorInput" type="color" value="#000000"></label>
+            </div>
+            <label class="field-label">
+              Kontur kalınlığı
+              <input id="strokeWidthInput" type="range" min="0" max="14" step="1" value="5">
+            </label>
+            <label class="toggle-row">
+              <span>Kutu</span>
+              <input id="boxEnabledInput" type="checkbox">
+            </label>
+            <label class="toggle-row">
+              <span>Gölge</span>
+              <input id="shadowEnabledInput" type="checkbox" checked>
+            </label>
+            <div class="drawer-preview style-live-preview" id="previewStage">
+              <div class="caption-preview" id="captionPreviewCard">
+                <span id="previewPrimary">Altyazı önizlemesi</span>
+                <span id="previewSecondary">Altyazı önizlemesi</span>
+              </div>
+              <video id="previewVideo" class="mogrt-preview-video" autoplay muted loop playsinline></video>
+            </div>
+            <label class="toggle-label hidden-field">
+              <input id="styleOverrideInput" type="checkbox">
+              <span>Stili MOGRT'e uygula</span>
+            </label>
+          </section>
+
+          <section class="style-panel-content" data-style-panel="animation">
+            <label class="field-label">
+              Efekt
+              <select id="animationInput">
+                <option value="none">Yok</option>
+                <option value="slide-up">Aşağıdan gelsin</option>
+                <option value="pop">Pop</option>
+                <option value="fade">Yumuşak geçiş</option>
+                <option value="karaoke">Karaoke</option>
+              </select>
+            </label>
+            <label class="toggle-row">
+              <span>Yumuşak geçiş</span>
+              <input id="crossDissolveInput" type="checkbox">
+            </label>
+            <p class="drawer-note">Daha karmaşık animasyonlar için sonraki versiyonda ayrı hareket modları ekleyebiliriz.</p>
+          </section>
+
+          <div class="drawer-actions">
+            <button class="ghost full" id="saveTemplateBtn" type="button">Yeni stil olarak kaydet</button>
+            <button class="ghost full" id="updateTemplateBtn" type="button">Seçili stili güncelle</button>
+          </div>
+        </aside>
+      </main>
+
+      <section class="apply-modal" id="applyModal" hidden>
+        <div class="modal-card">
+          <button class="modal-close" id="cancelApplyModalBtn" type="button">×</button>
+          <h2>Altyazı ekle</h2>
+          <label class="modal-option">
+            <input type="radio" name="applyCaptionType" value="srt">
+            <span>Premiere Pro altyazısı</span>
+          </label>
+          <label class="modal-option">
+            <input type="radio" name="applyCaptionType" value="animated" checked>
+            <span>Animasyonlu altyazı</span>
+          </label>
+          <p>Hazır stillerden birini seç, altyazı hatalarını kontrol et, sonra zaman çizelgesine uygula.</p>
+          <div class="modal-actions">
+            <button class="ghost" id="closeApplyModalBtn" type="button">Vazgeç</button>
+            <button class="primary" id="confirmApplyBtn" type="button">Devam et</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="apply-modal settings-modal" id="settingsModal" hidden>
+        <div class="modal-card settings-card">
+          <button class="modal-close" id="closeSettingsBtn" type="button">×</button>
+          <h2>Ayarlar</h2>
+
+          <div class="settings-grid">
+            <div class="settings-row">
+              <span>Sürüm</span>
+              <strong id="settingsVersion">v0.5.33</strong>
+              <small id="settingsVersionStatus">Yerel önizleme güncel.</small>
+            </div>
+            <div class="settings-row" id="settingsUpdateRow">
+              <span>Güncelleme</span>
+              <strong id="settingsUpdateStatus">Kontrol ediliyor</strong>
+              <small id="settingsUpdateDetails">GitHub güncelleme bilgisi okunuyor.</small>
+              <button class="primary settings-row-action" id="settingsInstallUpdateBtn" type="button" hidden>Güncellemeyi yükle</button>
+            </div>
+            <div class="settings-row">
+              <span>Yerel motor</span>
+              <strong id="settingsEngineStatus">Kontrol ediliyor</strong>
+              <small id="settingsEngineDetails">Whisper, FFmpeg ve model durumu okunuyor.</small>
+            </div>
+            <div class="settings-row">
+              <span>Google Translate</span>
+              <strong id="settingsGoogleStatus">Kontrol ediliyor</strong>
+              <small id="settingsGoogleDetails">API anahtarı durumu okunuyor.</small>
+            </div>
+            <div class="settings-row">
+              <span>Çeviri kullanımı</span>
+              <strong id="settingsTranslateUsage">0 karakter</strong>
+              <small>Yerel tahmini sayaçtır. Google'ın resmi kalan kotası Cloud Billing/Quota yetkisi olmadan okunamaz.</small>
+            </div>
+          </div>
+
+          <div class="modal-actions">
+            <button class="ghost" id="refreshSettingsBtn" type="button">Yenile</button>
+            <button class="primary" id="doneSettingsBtn" type="button">Tamam</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="apply-modal update-modal" id="updateModal" hidden>
+        <div class="modal-card update-card">
+          <button class="modal-close" id="deferUpdateCloseBtn" type="button">×</button>
+          <p class="modal-eyebrow">Capiton güncellemesi</p>
+          <h2>Yeni güncelleme var</h2>
+          <p id="updateModalSummary">Yeni sürüm hazır.</p>
+          <ul id="updateNotesList"></ul>
+          <div class="modal-actions">
+            <button class="ghost" id="deferUpdateBtn" type="button">Daha sonra</button>
+            <button class="primary" id="installUpdateBtn" type="button">Güncelle</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="output-pane">
+        <pre id="logOutput">Capiton hazır. Zaman çizelgesindeki sesler otomatik okunuyor.</pre>
+      </section>
+    </div>
+
+    <input id="fileInput" type="file" accept=".srt,.vtt,text/plain" hidden>
+    <select id="mogrtRatioInput" class="hidden-field" aria-hidden="true">
+      <option value="Portrait">9:16 Dikey</option>
+      <option value="Square">1:1 Kare</option>
+      <option value="Landscape">16:9 Yatay</option>
+    </select>
+    <select id="mogrtStyleInput" class="hidden-field" aria-hidden="true"></select>
+    <script src="./src/update-config.js?v=0.5.33"></script>
+    <script src="./src/cep-app.js?v=0.5.33"></script>
+  </body>
+</html>
