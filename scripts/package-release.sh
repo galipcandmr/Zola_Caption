@@ -12,14 +12,20 @@ mkdir -p "$STAGE"
 
 rsync -a \
   --exclude ".DS_Store" \
+  --exclude "assets/mogrts/" \
   "$ROOT/outputs/capiton-premiere-cep-plugin/" \
   "$STAGE/capiton-premiere-cep-plugin/"
 
+# tools/ (whisper.cpp build icin cmake, sadece gelistirme makinesinde gerekli) ve
+# vendor/ (kullanilmayan imageio_ffmpeg python paketi) calisma zamaninda gerekmiyor;
+# pakete dahil etmek sadece boyutu sisiriyor (~300MB).
 rsync -a \
   --exclude ".DS_Store" \
   --exclude ".env" \
   --exclude ".env.example.swp" \
   --exclude "work/" \
+  --exclude "tools/" \
+  --exclude "vendor/" \
   "$ROOT/outputs/capiton-local-engine/" \
   "$STAGE/capiton-local-engine/"
 
