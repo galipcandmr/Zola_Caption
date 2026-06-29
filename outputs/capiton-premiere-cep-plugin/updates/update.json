@@ -1,13 +1,11 @@
 {
-  "latest": "0.5.36",
+  "latest": "0.5.37",
   "minSupported": "0.5.30",
   "mandatory": false,
-  "downloadUrl": "https://github.com/galipcandmr/Zola_Caption/releases/download/v0.5.36/Zola-Caption-v0.5.36.zip",
+  "downloadUrl": "https://github.com/galipcandmr/Zola_Caption/releases/download/v0.5.37/Zola-Caption-v0.5.37.zip",
   "installMode": "engine",
   "notes": [
-    "Lokal Whisper transkripsiyonu artik her kurulumda calisiyor (dyld kutuphane hatasi giderildi)",
-    "Cevrilen altyazi artik kaynak dilin uzerine yazmiyor, ayri track'e ekleniyor",
-    "Ayarlar panelinde Google Translate API anahtari dogrudan kaydedilebiliyor",
-    "Kullanilmayan gelistirici maliyet hesaplayici arayuzu kaldirildi"
+    "Paket icindeki marka logosu eksikti, duzeltildi",
+    "Paketleme scripti artik kritik dosyalar eksikse sessizce bozuk paket uretmiyor, hata verip duruyor"
   ]
 }
