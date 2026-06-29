@@ -33,6 +33,23 @@ cp "$ROOT/README.md" "$STAGE/README.md"
 cp "$ROOT/scripts/install-macos.sh" "$STAGE/Zola Caption Installer.command"
 chmod +x "$STAGE/Zola Caption Installer.command"
 
+# Guvenlik kontrolu: rsync ara sira (disk/Spotlight kilidi vb. nedenlerle) sessizce
+# dosya atlayabiliyor. Kritik dosyalarin gercekten kopyalandigini dogrula, yoksa
+# bozuk bir paket sessizce yayinlanmasin.
+REQUIRED_FILES=(
+  "$STAGE/capiton-premiere-cep-plugin/assets/brand/zolalogo.png"
+  "$STAGE/capiton-local-engine/bin/whisper-cli"
+  "$STAGE/capiton-local-engine/bin/ffmpeg"
+  "$STAGE/capiton-local-engine/models/ggml-small.bin"
+)
+for required_file in "${REQUIRED_FILES[@]}"; do
+  if [ ! -s "$required_file" ]; then
+    echo "HATA: paket eksik/bos dosya icindeki cikti: $required_file" >&2
+    echo "rsync sessizce basarisiz olmus olabilir, scripti tekrar calistir." >&2
+    exit 1
+  fi
+done
+
 (
   cd "$DIST"
     zip -qr "Zola-Caption-v$VERSION.zip" "Zola-Caption-v$VERSION"
