@@ -1,11 +1,13 @@
 {
-  "latest": "0.5.37",
+  "latest": "0.5.38",
   "minSupported": "0.5.30",
   "mandatory": false,
-  "downloadUrl": "https://github.com/galipcandmr/Zola_Caption/releases/download/v0.5.37/Zola-Caption-v0.5.37.zip",
+  "downloadUrl": "https://github.com/galipcandmr/Zola_Caption/releases/download/v0.5.38/Zola-Caption-v0.5.38.zip",
   "installMode": "engine",
   "notes": [
-    "Paket icindeki marka logosu eksikti, duzeltildi",
-    "Paketleme scripti artik kritik dosyalar eksikse sessizce bozuk paket uretmiyor, hata verip duruyor"
+    "Guncelleme indirme sonrasi takilma sorunu kokten cozuldu (yaris durumu fix'i)",
+    "Guncelleme sirasinda gercek ilerleme durumu goruluyor (indiriliyor/aciliyor/kopyalaniyor/yeniden baslatiliyor)",
+    "Her kurulum ve guncellemede Gatekeeper/quarantine ve kod imzasi otomatik temizleniyor",
+    "Disk alani kontrolu ve gecici dosya temizligi eklendi"
   ]
 }
