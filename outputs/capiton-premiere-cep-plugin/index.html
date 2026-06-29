@@ -303,6 +303,7 @@
               <strong id="settingsUpdateStatus">Kontrol ediliyor</strong>
               <small id="settingsUpdateDetails">GitHub güncelleme bilgisi okunuyor.</small>
               <button class="primary settings-row-action" id="settingsInstallUpdateBtn" type="button" hidden>Güncellemeyi yükle</button>
+              <small id="settingsUpdateProgress" class="settings-row-feedback" hidden></small>
             </div>
             <div class="settings-row">
               <span>Yerel motor</span>
@@ -340,6 +341,7 @@
           <h2>Yeni güncelleme var</h2>
           <p id="updateModalSummary">Yeni sürüm hazır.</p>
           <ul id="updateNotesList"></ul>
+          <small id="updateModalProgress" class="settings-row-feedback" hidden></small>
           <div class="modal-actions">
             <button class="ghost" id="deferUpdateBtn" type="button">Daha sonra</button>
             <button class="primary" id="installUpdateBtn" type="button">Güncelle</button>

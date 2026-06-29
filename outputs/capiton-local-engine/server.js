@@ -4,9 +4,10 @@
 const http = require("http");
 const https = require("https");
 const fs = require("fs");
+const fsp = fs.promises;
 const path = require("path");
 const os = require("os");
-const { spawn } = require("child_process");
+const { spawn, execFileSync } = require("child_process");
 
 const ROOT = __dirname;
 const PORT = Number(process.env.CAPITON_ENGINE_PORT || 17771);
@@ -16,6 +17,12 @@ const ENV_PATH = path.join(ROOT, ".env");
 loadEnvFile(ENV_PATH);
 let GOOGLE_TRANSLATE_API_KEY =
   process.env.CAPITON_GOOGLE_TRANSLATE_API_KEY || process.env.GOOGLE_TRANSLATE_API_KEY || "";
+
+let updateJobState = { phase: "idle", message: "", code: null, updatedAt: 0 };
+
+function setUpdateJob(phase, message, code) {
+  updateJobState = { phase, message, code: code || null, updatedAt: Date.now() };
+}
 
 fs.mkdirSync(WORK_DIR, { recursive: true });
 
@@ -67,7 +74,19 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && req.url === "/install-update") {
       const body = await readJson(req);
       const result = await installUpdatePackage(body);
-      sendJson(res, result.ok ? 200 : 422, result);
+      const restartEngineTarget = result.ok ? result.engineTarget : null;
+      sendJson(res, result.ok ? 200 : 422, result, restartEngineTarget ? () => {
+        // Cevap soketten cikip tamamlanana kadar bekle; motor surecini burada
+        // oldurup yeniden baslatiyoruz, bunu cevaptan ONCE yapmak panele yarim
+        // kalmis/kopuk bir cevap olarak gidip "Yukleniyor" ekraninda asili
+        // kalmasina sebep oluyordu.
+        setTimeout(() => installLaunchAgent(restartEngineTarget), 300);
+      } : undefined);
+      return;
+    }
+
+    if (req.method === "GET" && req.url === "/update-status") {
+      sendJson(res, 200, { ok: true, ...updateJobState });
       return;
     }
 
@@ -458,6 +477,7 @@ async function installUpdatePackage(body) {
   const extensionPath = String(info.extensionPath || "").trim();
 
   if (!downloadUrl || !/^https:\/\/github\.com\/galipcandmr\/Zola_Caption\/releases\/download\//.test(downloadUrl)) {
+    setUpdateJob("error", "Güncelleme adresi güvenli Zola Caption GitHub release adresi değil.", "INVALID_UPDATE_URL");
     return {
       ok: false,
       code: "INVALID_UPDATE_URL",
@@ -471,7 +491,24 @@ async function installUpdatePackage(body) {
   fs.mkdirSync(updateDir, { recursive: true });
 
   try {
+    setUpdateJob("checking", "Disk alanı kontrol ediliyor...");
+    const REQUIRED_BYTES = 1.5 * 1024 * 1024 * 1024;
+    const freeBytes = getAvailableDiskBytes(os.tmpdir());
+    if (freeBytes !== null && freeBytes < REQUIRED_BYTES) {
+      const message =
+        "Yetersiz disk alanı: " +
+        Math.round(freeBytes / 1024 / 1024) +
+        "MB boş, güncelleme için en az " +
+        Math.round(REQUIRED_BYTES / 1024 / 1024) +
+        "MB gerekiyor.";
+      setUpdateJob("error", message, "INSUFFICIENT_DISK_SPACE");
+      return { ok: false, code: "INSUFFICIENT_DISK_SPACE", message };
+    }
+
+    setUpdateJob("downloading", "Güncelleme GitHub'dan indiriliyor...");
     await downloadFile(downloadUrl, zipPath);
+
+    setUpdateJob("extracting", "Paket açılıyor...");
     await unzipFile(zipPath, updateDir);
 
     const packageRoot = findUpdatePackageRoot(updateDir);
@@ -479,6 +516,7 @@ async function installUpdatePackage(body) {
     const engineSource = path.join(packageRoot, "capiton-local-engine");
 
     if (!fs.existsSync(cepSource) || !fs.existsSync(engineSource)) {
+      setUpdateJob("error", "Güncelleme paketi beklenen Zola Caption klasörlerini içermiyor.", "INVALID_UPDATE_PACKAGE");
       return {
         ok: false,
         code: "INVALID_UPDATE_PACKAGE",
@@ -488,15 +526,23 @@ async function installUpdatePackage(body) {
 
     const cepTarget = extensionPath || defaultCepExtensionPath();
     const engineTarget = ROOT;
-    copyDirectory(cepSource, cepTarget, {
+
+    setUpdateJob("installing", "Panel dosyaları kopyalanıyor...");
+    await copyDirectory(cepSource, cepTarget, {
       removeTarget: true,
       preserveNames: new Set()
     });
-    copyDirectory(engineSource, engineTarget, {
+
+    setUpdateJob("installing", "Yerel motor dosyaları kopyalanıyor...");
+    await copyDirectory(engineSource, engineTarget, {
       removeTarget: false,
       preserveNames: new Set([".env", "work"])
     });
-    installLaunchAgent(engineTarget);
+
+    setUpdateJob("hardening", "Güvenlik bayrakları (quarantine/codesign) temizleniyor...");
+    hardenEngineBinaries(engineTarget);
+
+    setUpdateJob("restarting", "Arka plan motoru yeniden başlatılıyor...");
 
     return {
       ok: true,
@@ -504,14 +550,51 @@ async function installUpdatePackage(body) {
       cepTarget,
       engineTarget,
       message:
-        "Zola Caption güncellendi. Değişikliğin tamamen yansıması için Premiere Pro'yu kapatıp yeniden aç."
+        "Zola Caption güncellendi; arka plan motoru otomatik yeniden başlatılıyor. Panelin tamamen yenilenmesi için Premiere Pro'yu kapatıp yeniden aç."
     };
   } catch (error) {
+    setUpdateJob("error", error.message || String(error), "UPDATE_INSTALL_FAILED");
     return {
       ok: false,
       code: "UPDATE_INSTALL_FAILED",
       message: "Güncelleme yüklenemedi: " + (error.message || String(error))
     };
+  } finally {
+    fs.rmSync(updateDir, { recursive: true, force: true });
+  }
+}
+
+function getAvailableDiskBytes(targetPath) {
+  try {
+    const output = execFileSync("df", ["-k", targetPath], { encoding: "utf8" });
+    const lines = output.trim().split("\n");
+    const columns = lines[lines.length - 1].trim().split(/\s+/);
+    const availableKb = Number(columns[3]);
+    return isNaN(availableKb) ? null : availableKb * 1024;
+  } catch (error) {
+    return null;
+  }
+}
+
+function hardenEngineBinaries(engineTarget) {
+  try {
+    execFileSync("xattr", ["-dr", "com.apple.quarantine", engineTarget], { stdio: "ignore" });
+  } catch (error) {}
+
+  const binDir = path.join(engineTarget, "bin");
+  let entries = [];
+  try {
+    entries = fs.readdirSync(binDir);
+  } catch (error) {
+    return;
+  }
+  for (const name of entries) {
+    if (!name.endsWith(".dylib") && name !== "whisper-cli" && name !== "ffmpeg") {
+      continue;
+    }
+    try {
+      execFileSync("codesign", ["--force", "--sign", "-", path.join(binDir, name)], { stdio: "ignore" });
+    } catch (error) {}
   }
 }
 
@@ -581,7 +664,7 @@ function findUpdatePackageRoot(updateDir) {
   throw new Error("Güncelleme paketi kök klasörü bulunamadı.");
 }
 
-function copyDirectory(source, target, options = {}) {
+async function copyDirectory(source, target, options = {}) {
   const preserveNames = options.preserveNames || new Set();
   if (options.removeTarget && fs.existsSync(target)) {
     fs.rmSync(target, { recursive: true, force: true });
@@ -598,10 +681,13 @@ function copyDirectory(source, target, options = {}) {
       if (fs.existsSync(targetPath) && !fs.statSync(targetPath).isDirectory()) {
         fs.rmSync(targetPath, { force: true });
       }
-      copyDirectory(sourcePath, targetPath, { preserveNames });
+      await copyDirectory(sourcePath, targetPath, { preserveNames });
     } else {
-      fs.copyFileSync(sourcePath, targetPath);
+      await fsp.copyFile(sourcePath, targetPath);
       fs.chmodSync(targetPath, stat.mode);
+      // Buyuk dosyalar arasinda event loop'a nefes alma firsati ver, yoksa
+      // kopyalama suresince /update-status sorgulamasi cevap alamiyor.
+      await new Promise((resolve) => setImmediate(resolve));
     }
   }
 }
@@ -1311,8 +1397,11 @@ function readJson(req) {
   });
 }
 
-function sendJson(res, status, payload) {
+function sendJson(res, status, payload, onFinish) {
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
+  if (onFinish) {
+    res.on("finish", onFinish);
+  }
   res.end(JSON.stringify(payload));
 }
 

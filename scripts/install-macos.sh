@@ -109,6 +109,18 @@ rm -rf "$cep_target"
 /usr/bin/rsync -a --delete --exclude ".DS_Store" "$cep_source/" "$cep_target/"
 /usr/bin/rsync -a --exclude ".DS_Store" --exclude ".env" --exclude "work/" "$engine_source/" "$engine_target/"
 
+# Indirilen DMG/zip Gatekeeper tarafindan quarantine ile isaretlenmis olabilir;
+# bu bayrak kopyalanan dosyalara da gecerse whisper-cli/ffmpeg/dylib'ler
+# "tanimlanamayan gelistirici" diye calismayi reddedebilir. Quarantine'i temizle
+# ve adhoc imzayi tazele.
+/usr/bin/xattr -dr com.apple.quarantine "$engine_target" >/dev/null 2>&1 || true
+if [ -d "$engine_target/bin" ]; then
+  for bin_file in "$engine_target/bin"/*.dylib "$engine_target/bin/whisper-cli" "$engine_target/bin/ffmpeg"; do
+    [ -f "$bin_file" ] || continue
+    /usr/bin/codesign --force --sign - "$bin_file" >/dev/null 2>&1 || true
+  done
+fi
+
 for version in 11 12 13 14 15; do
   defaults write "com.adobe.CSXS.$version" PlayerDebugMode 1 >/dev/null 2>&1 || true
 done

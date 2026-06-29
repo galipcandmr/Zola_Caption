@@ -418,6 +418,7 @@
     els.settingsUpdateStatus = document.querySelector("#settingsUpdateStatus");
     els.settingsUpdateDetails = document.querySelector("#settingsUpdateDetails");
     els.settingsInstallUpdateBtn = document.querySelector("#settingsInstallUpdateBtn");
+    els.settingsUpdateProgress = document.querySelector("#settingsUpdateProgress");
     els.settingsEngineStatus = document.querySelector("#settingsEngineStatus");
     els.settingsEngineDetails = document.querySelector("#settingsEngineDetails");
     els.settingsGoogleStatus = document.querySelector("#settingsGoogleStatus");
@@ -429,6 +430,7 @@
     els.updateModal = document.querySelector("#updateModal");
     els.updateModalSummary = document.querySelector("#updateModalSummary");
     els.updateNotesList = document.querySelector("#updateNotesList");
+    els.updateModalProgress = document.querySelector("#updateModalProgress");
     els.installUpdateBtn = document.querySelector("#installUpdateBtn");
     els.deferUpdateBtn = document.querySelector("#deferUpdateBtn");
     els.deferUpdateCloseBtn = document.querySelector("#deferUpdateCloseBtn");
@@ -958,6 +960,45 @@
     renderUpdateStatus();
   }
 
+  var updateStatusPollTimer = null;
+
+  function startUpdateStatusPolling() {
+    stopUpdateStatusPolling();
+    pollUpdateStatusOnce();
+    updateStatusPollTimer = setInterval(pollUpdateStatusOnce, 1000);
+  }
+
+  function stopUpdateStatusPolling() {
+    if (updateStatusPollTimer) {
+      clearInterval(updateStatusPollTimer);
+      updateStatusPollTimer = null;
+    }
+  }
+
+  function pollUpdateStatusOnce() {
+    requestJson("http://127.0.0.1:17771/update-status", function (result) {
+      if (!result || !result.ok || !result.data) {
+        return;
+      }
+      showUpdateProgress(result.data.message || "");
+    });
+  }
+
+  function showUpdateProgress(message) {
+    [els.settingsUpdateProgress, els.updateModalProgress].forEach(function (el) {
+      if (!el) {
+        return;
+      }
+      if (!message) {
+        el.hidden = true;
+        el.textContent = "";
+        return;
+      }
+      el.hidden = false;
+      el.textContent = message;
+    });
+  }
+
   function installAvailableUpdate() {
     var info = state.updateInfo;
     if (!info || !info.downloadUrl) {
@@ -970,6 +1011,8 @@
       els.settingsInstallUpdateBtn.textContent = "Yükleniyor";
     }
     writeLog("Güncelleme indiriliyor ve kuruluyor: v" + info.latest + ". Lütfen işlem bitene kadar Premiere'i kapatma.");
+    showUpdateProgress("Güncelleme başlatılıyor...");
+    startUpdateStatusPolling();
 
     callEngine(
       "/install-update",
@@ -979,11 +1022,13 @@
         extensionPath: getExtensionRootPath()
       },
       function (result) {
+        stopUpdateStatusPolling();
         if (els.settingsInstallUpdateBtn) {
           els.settingsInstallUpdateBtn.disabled = false;
           els.settingsInstallUpdateBtn.textContent = "Güncellemeyi yükle";
         }
         if (!result.ok) {
+          showUpdateProgress("");
           writeLog(result.message || "Güncelleme otomatik kurulamadı.");
           if (window.cep && window.cep.util && typeof window.cep.util.openURLInDefaultBrowser === "function") {
             writeLog("Manuel paket adresi açılıyor. Otomatik kurulum için yerel motor açık olmalı.");
@@ -992,6 +1037,7 @@
           return;
         }
 
+        showUpdateProgress("Tamamlandı.");
         writeLog(
           (result.message || "Güncelleme kuruldu.") +
             "\nPanel: " +
