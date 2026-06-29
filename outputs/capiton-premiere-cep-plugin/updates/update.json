@@ -1,12 +1,13 @@
 {
-  "latest": "0.5.35",
+  "latest": "0.5.36",
   "minSupported": "0.5.30",
   "mandatory": false,
-  "downloadUrl": "https://github.com/galipcandmr/Zola_Caption/releases/download/v0.5.35/Zola-Caption-v0.5.35.zip",
+  "downloadUrl": "https://github.com/galipcandmr/Zola_Caption/releases/download/v0.5.36/Zola-Caption-v0.5.36.zip",
   "installMode": "engine",
   "notes": [
-    "Tek tık otomatik güncelleme akışı eklendi.",
-    "macOS DMG installer ve LaunchAgent kurulumu hazırlandı.",
-    "Panel ve yerel motor güncellemesi beta testçiler için otomatikleştirildi."
+    "Lokal Whisper transkripsiyonu artik her kurulumda calisiyor (dyld kutuphane hatasi giderildi)",
+    "Cevrilen altyazi artik kaynak dilin uzerine yazmiyor, ayri track'e ekleniyor",
+    "Ayarlar panelinde Google Translate API anahtari dogrudan kaydedilebiliyor",
+    "Kullanilmayan gelistirici maliyet hesaplayici arayuzu kaldirildi"
   ]
 }

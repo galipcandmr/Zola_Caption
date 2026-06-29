@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  var CURRENT_VERSION = "v0.5.35";
+  var CURRENT_VERSION = "v0.5.36";
 
   var scenarios = [
     {
