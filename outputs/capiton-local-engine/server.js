@@ -474,7 +474,7 @@ async function installUpdatePackage(body) {
   const info = body || {};
   const downloadUrl = String(info.downloadUrl || "").trim();
   const version = String(info.version || info.latest || "").replace(/^v/i, "").trim();
-  const extensionPath = String(info.extensionPath || "").trim();
+  const extensionPath = normalizeFileSystemPath(info.extensionPath);
 
   if (!downloadUrl || !/^https:\/\/github\.com\/galipcandmr\/Zola_Caption\/releases\/download\//.test(downloadUrl)) {
     setUpdateJob("error", "Güncelleme adresi güvenli Zola Caption GitHub release adresi değil.", "INVALID_UPDATE_URL");
@@ -536,7 +536,7 @@ async function installUpdatePackage(body) {
     setUpdateJob("installing", "Yerel motor dosyaları kopyalanıyor...");
     await copyDirectory(engineSource, engineTarget, {
       removeTarget: false,
-      preserveNames: new Set([".env", "work"])
+      preserveNames: new Set([".env", "work", "bin", "models"])
     });
 
     setUpdateJob("hardening", "Güvenlik bayrakları (quarantine/codesign) temizleniyor...");
@@ -596,6 +596,21 @@ function hardenEngineBinaries(engineTarget) {
       execFileSync("codesign", ["--force", "--sign", "-", path.join(binDir, name)], { stdio: "ignore" });
     } catch (error) {}
   }
+}
+
+function normalizeFileSystemPath(value) {
+  let raw = String(value || "").trim();
+  // Some CEP/Premiere builds report getSystemPath("extension") as a
+  // file:// URI (percent-encoded) instead of a plain filesystem path; using
+  // that raw string as a copy target creates a bogus nested directory tree
+  // instead of writing to the real extension folder.
+  if (/^file:\/\//i.test(raw)) {
+    raw = raw.replace(/^file:\/\//i, "");
+    try {
+      raw = decodeURIComponent(raw);
+    } catch (error) {}
+  }
+  return raw;
 }
 
 function defaultCepExtensionPath() {
@@ -729,11 +744,21 @@ function installLaunchAgent(engineTarget) {
   fs.mkdirSync(launchAgentsDir, { recursive: true });
   fs.writeFileSync(plistPath, plist, "utf8");
   const launchctl = findExecutable(["/bin/launchctl", "launchctl"]);
-  if (launchctl) {
-    spawn(launchctl, ["bootout", `gui/${process.getuid()}`, plistPath], { stdio: "ignore" }).on("close", () => {
-      spawn(launchctl, ["bootstrap", `gui/${process.getuid()}`, plistPath], { stdio: "ignore" });
-    });
+  const shell = findExecutable(["/bin/sh", "sh"]);
+  if (launchctl && shell) {
+    // bootout kills this very process (it's the running LaunchAgent job), so
+    // chaining bootstrap on its "close" event is unreliable: this process's
+    // event loop can die before the callback fires, leaving the agent
+    // unloaded with no restart. Run the restart as a separate detached shell
+    // so it survives this process being killed mid-restart.
+    const restartCommand = `${shellQuote(launchctl)} bootout gui/${process.getuid()} ${shellQuote(plistPath)}; ${shellQuote(launchctl)} bootstrap gui/${process.getuid()} ${shellQuote(plistPath)}`;
+    const child = spawn(shell, ["-c", restartCommand], { stdio: "ignore", detached: true });
+    child.unref();
   }
+}
+
+function shellQuote(value) {
+  return `'${String(value).replace(/'/g, `'\\''`)}'`;
 }
 
 function xmlEscape(value) {
@@ -785,9 +810,16 @@ function parseWhisperWords(json) {
         const offsets = token.offsets || {};
         const timestamps = token.timestamps || {};
         const from = secondsFromWhisperTime(timestamps.from, offsets.from, token.t0 ?? token.start ?? token.start_ms);
-        const to = secondsFromWhisperTime(timestamps.to, offsets.to, token.t1 ?? token.end ?? token.end_ms);
-        if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) {
+        let to = secondsFromWhisperTime(timestamps.to, offsets.to, token.t1 ?? token.end ?? token.end_ms);
+        if (!Number.isFinite(from) || !Number.isFinite(to)) {
           continue;
+        }
+        if (to <= from) {
+          // whisper.cpp sometimes emits zero-duration word tokens right after
+          // a silence gap; give them a minimal width instead of dropping
+          // them, otherwise the word disappears from the global timeline and
+          // every caption after the gap mis-aligns against it.
+          to = from + 0.06;
         }
 
         const startsNewWord = /^\s/.test(rawText);

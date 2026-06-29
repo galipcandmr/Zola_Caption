@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  var CURRENT_VERSION = "v0.5.38";
+  var CURRENT_VERSION = "v1.0.0-beta";
 
   var scenarios = [
     {
@@ -2427,10 +2427,23 @@
 
   function getExtensionRootPath() {
     try {
-      return window.__adobe_cep__.getSystemPath("extension");
+      return normalizeFileSystemPath(window.__adobe_cep__.getSystemPath("extension"));
     } catch (error) {
       return "";
     }
+  }
+
+  function normalizeFileSystemPath(value) {
+    var raw = String(value || "");
+    // Some CEP/Premiere builds return a file:// URI (percent-encoded) from
+    // getSystemPath("extension") instead of a plain filesystem path.
+    if (/^file:\/\//i.test(raw)) {
+      raw = raw.replace(/^file:\/\//i, "");
+      try {
+        raw = decodeURIComponent(raw);
+      } catch (error) {}
+    }
+    return raw;
   }
 
   function getTimelineCaptionText(caption) {
@@ -2491,7 +2504,7 @@
     }
 
     var wordTexts = clean.split(" ").filter(Boolean);
-    var wordItems = buildEditorWordItems(caption, wordTexts);
+    var wordItems = getCaptionWordItems(caption, wordTexts);
     var fullText = formatMogrtCaptionText(clean);
     var payloads = [];
 
@@ -2581,7 +2594,15 @@
           text: group.map(function (item) {
             return item.text;
           }).join(" "),
-          translation: ""
+          translation: "",
+          // Cache the word timings resolved here, while this caption's exact
+          // boundaries are unambiguous. Re-deriving them later from the
+          // global word pool by a fixed time window leaks neighboring
+          // words across back-to-back (zero-gap) captions and corrupts the
+          // karaoke highlight order.
+          words: group.map(function (item) {
+            return { text: item.text, start: Number(item.start), end: Number(item.end) };
+          })
         });
       });
     });
@@ -2606,6 +2627,22 @@
         end: start + (index + 1) * step
       };
     });
+  }
+
+  function getCaptionWordItems(caption, wordTexts) {
+    if (Array.isArray(caption.words) && caption.words.length === wordTexts.length) {
+      var matchesCache = caption.words.every(function (item, index) {
+        return normalizeWordForTiming(item.text) === normalizeWordForTiming(wordTexts[index]);
+      });
+      if (matchesCache) {
+        return caption.words.map(function (item) {
+          return { text: item.text, start: Number(item.start), end: Number(item.end) };
+        });
+      }
+    }
+    // Cache miss (translation active, or user edited the caption text):
+    // fall back to re-deriving from the global word pool.
+    return buildEditorWordItems(caption, wordTexts);
   }
 
   function splitWordItemsBySmartLimit(wordItems, maxWords) {
@@ -2812,10 +2849,16 @@
   }
 
   function getWordsForCaption(caption) {
-    var start = Number(caption.start || 0) - 0.08;
-    var end = Number(caption.end || 0) + 0.08;
+    var start = Number(caption.start || 0);
+    var end = Number(caption.end || 0);
+    // Use each word's midpoint rather than a padded overlap window: whisper
+    // segments are usually back-to-back with zero gap between them, so any
+    // positive padding leaks the neighboring caption's edge word into this
+    // caption's pool, throws off the word count, and collapses the whole
+    // caption onto the even-interpolation fallback.
     return (state.latestWords || []).filter(function (word) {
-      return Number(word.start) < end && Number(word.end) > start;
+      var mid = (Number(word.start) + Number(word.end)) / 2;
+      return mid >= start && mid < end;
     });
   }
 
@@ -2848,58 +2891,6 @@
     return String(word || "")
       .toLocaleLowerCase("tr-TR")
       .replace(/[^a-z0-9çğıöşüâîû]+/gi, "");
-  }
-
-  function getGlobalTimedWords() {
-    return (state.latestWords || []).map(function (word) {
-      return {
-        text: String(word.text || word.word || "").replace(/\s+/g, " ").trim(),
-        start: Number(word.start),
-        end: Number(word.end)
-      };
-    }).filter(function (word) {
-      return word.text && isFinite(word.start) && isFinite(word.end) && word.end > word.start;
-    }).sort(function (left, right) {
-      return left.start - right.start;
-    });
-  }
-
-  function fallbackWordItemFromCaption(caption, word, index, total) {
-    var start = Number(caption.start || 0);
-    var end = Math.max(start + 0.25, Number(caption.end || 0));
-    var step = (end - start) / Math.max(1, total);
-    return {
-      text: word,
-      weight: Math.max(1, String(word || "").length),
-      start: start + index * step,
-      end: start + (index + 1) * step
-    };
-  }
-
-  function buildSequentialWordItems(caption, wordTexts, timedWords, cursor) {
-    var items = [];
-    var nextCursor = cursor || 0;
-
-    wordTexts.forEach(function (word, index) {
-      if (nextCursor < timedWords.length && timedWords[nextCursor]) {
-        var timing = timedWords[nextCursor];
-        items.push({
-          text: word,
-          weight: Math.max(1, String(word || "").length),
-          start: Number(timing.start),
-          end: Math.max(Number(timing.start) + 0.08, Number(timing.end))
-        });
-        nextCursor += 1;
-        return;
-      }
-
-      items.push(fallbackWordItemFromCaption(caption, word, index, wordTexts.length));
-    });
-
-    return {
-      items: items,
-      nextCursor: nextCursor
-    };
   }
 
   function isWordHighlightStyle() {
@@ -2941,18 +2932,17 @@
   function buildKaraokeOverlayCaptions() {
     var maxWords = clampWordsPerScreen(state.wordsPerScreen);
     var clipDuration = Number(state.latestClipDurationSeconds || 0);
-    var timedWords = getGlobalTimedWords();
-    var cursor = 0;
     var output = [];
 
     state.captions.forEach(function (caption) {
       var clean = String(getRawTimelineCaptionText(caption) || "").replace(/\s+/g, " ").trim();
       var wordTexts = clean ? clean.split(" ").filter(Boolean) : [];
-      var sequential = timedWords.length
-        ? buildSequentialWordItems(caption, wordTexts, timedWords, cursor)
-        : { items: buildEditorWordItems(caption, wordTexts), nextCursor: cursor };
-      var wordItems = sequential.items;
-      cursor = sequential.nextCursor;
+      // Reuse the word timings cached at caption-creation time instead of
+      // re-deriving them from the global word pool by a fixed time window:
+      // back-to-back (zero-gap) captions otherwise leak a neighboring word
+      // across the boundary, which corrupts word counts and produces the
+      // wrong karaoke highlight order/timing.
+      var wordItems = getCaptionWordItems(caption, wordTexts);
 
       if (caption.hidden) {
         return;

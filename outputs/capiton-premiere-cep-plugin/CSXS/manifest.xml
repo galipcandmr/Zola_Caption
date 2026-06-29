@@ -2,11 +2,11 @@
 <ExtensionManifest
   Version="7.0"
   ExtensionBundleId="com.zoladijital.capiton"
-  ExtensionBundleVersion="0.5.38"
+  ExtensionBundleVersion="1.0.0"
   ExtensionBundleName="Zola Caption"
   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <ExtensionList>
-    <Extension Id="com.zoladijital.capiton.panel" Version="0.5.38"/>
+    <Extension Id="com.zoladijital.capiton.panel" Version="1.0.0"/>
   </ExtensionList>
   <ExecutionEnvironment>
     <HostList>
