@@ -4,11 +4,25 @@ Zola Dijital icin Premiere Pro altyazi paneli.
 
 ## Klasorler
 
+- `CLAUDE.md`: Claude Code veya yeni gelistirici icin ilk okunacak devir notu.
+- `docs/`: Mimari, release, troubleshooting, feature history ve guvenlik dokumanlari.
 - `outputs/capiton-premiere-cep-plugin`: Premiere CEP paneli.
 - `outputs/capiton-local-engine`: Lokal Whisper ve Google Translate motoru.
 - `scripts/package-release.sh`: Beta release zip paketi olusturur.
 - `scripts/build-macos-dmg.sh`: Beta tester icin tek tik macOS DMG kurulum paketi olusturur.
 - `scripts/install-macos.sh`: DMG ve zip icindeki otomatik macOS kurulum script'i.
+- `scripts/package-handoff.sh`: Claude Code/devralacak kisi icin secretsiz devir paketi olusturur.
+
+## Devir Dokumanlari
+
+Projeyi devralacak kisi su sirayla okumali:
+
+1. `CLAUDE.md`
+2. `docs/HANDOFF.md`
+3. `docs/ARCHITECTURE.md`
+4. `docs/DEVELOPMENT_GUIDE.md`
+5. `docs/RELEASE_AND_UPDATE.md`
+6. `docs/TROUBLESHOOTING.md`
 
 ## GitHub Beta Update Akisi
 
@@ -81,3 +95,17 @@ DMG icindeki `Zola Caption Installer.command` beta tester bilgisayarinda sunlari
 - macOS LaunchAgent kurarak yerel motoru acilista otomatik baslatir.
 - Node yoksa hafif runtime'i uygulama destek klasorune indirir.
 - Premiere Legacy Extension debug modunu acar.
+
+## Devir Paketi Olusturma
+
+```bash
+scripts/package-handoff.sh
+```
+
+Cikti:
+
+```text
+dist/Zola-Caption-Handoff-YYYYMMDD-HHMM.zip
+```
+
+Bu paket kaynak kodu, dokumanlari ve mevcut release artifactlerini icerir. `.env`, `.git`, `work/`, cache ve gecici dosyalar dahil edilmez.
