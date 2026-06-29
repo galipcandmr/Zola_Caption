@@ -534,7 +534,81 @@ function capitonImportCaptionFile(srtPath, startSeconds) {
   }
 }
 
-function capitonImportOverlayFile(mediaPath, startSeconds) {
+function capitonGetVideoTrackCount(sequence) {
+  try {
+    return capitonFirstNumber([
+      capitonSafeNumber(sequence.videoTracks, "numTracks"),
+      capitonSafeNumber(sequence.videoTracks, "numItems"),
+      capitonSafeNumber(sequence.videoTracks, "length")
+    ]);
+  } catch (error) {
+    return 0;
+  }
+}
+
+function capitonEnsureVideoTrackCount(sequence, requiredCount) {
+  try {
+    var currentCount = capitonGetVideoTrackCount(sequence);
+    if (currentCount > requiredCount) {
+      return currentCount;
+    }
+
+    app.enableQE();
+    if (!qe || !qe.project) {
+      return currentCount;
+    }
+    var qeSequence = qe.project.getActiveSequence();
+    if (!qeSequence || !qeSequence.addTracks) {
+      return currentCount;
+    }
+
+    while (currentCount <= requiredCount) {
+      qeSequence.addTracks(1, currentCount, 0, 0, 0, 0, 0);
+      currentCount += 1;
+    }
+    return currentCount;
+  } catch (error) {
+    return capitonGetVideoTrackCount(sequence);
+  }
+}
+
+function capitonTrackRangeIsFree(track, startSeconds, endSeconds) {
+  try {
+    if (!track || !track.clips) {
+      return true;
+    }
+    var clips = track.clips;
+    var count = capitonFirstNumber([capitonSafeNumber(clips, "numItems"), capitonSafeNumber(clips, "length"), 512]);
+    for (var i = 0; i < count; i += 1) {
+      var clip = capitonGetCollectionItem(clips, i);
+      if (!clip) {
+        continue;
+      }
+      var clipStart = capitonTimeSeconds(clip.start);
+      var clipEnd = capitonTimeSeconds(clip.end);
+      if (clipEnd > startSeconds && clipStart < endSeconds) {
+        return false;
+      }
+    }
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
+function capitonFindFreeOverlayTrackIndex(sequence, startSeconds, endSeconds) {
+  var videoCount = capitonGetVideoTrackCount(sequence);
+  for (var i = 1; i < videoCount; i += 1) {
+    var track = capitonGetCollectionItem(sequence.videoTracks, i);
+    if (capitonTrackRangeIsFree(track, startSeconds, endSeconds)) {
+      return i;
+    }
+  }
+  capitonEnsureVideoTrackCount(sequence, videoCount);
+  return videoCount;
+}
+
+function capitonImportOverlayFile(mediaPath, startSeconds, durationSeconds) {
   try {
     if (!mediaPath) {
       return capitonJson({ ok: false, message: "Görsel altyazı yolu boş." });
@@ -549,31 +623,30 @@ function capitonImportOverlayFile(mediaPath, startSeconds) {
     var sequence = app.project.activeSequence;
     var addedToTimeline = false;
     var timelineMessage = "";
+    var usedTrackIndex = -1;
     var safeStartSeconds = Number(startSeconds || 0);
     if (isNaN(safeStartSeconds) || safeStartSeconds < 0) {
       safeStartSeconds = 0;
     }
+    var safeDurationSeconds = Number(durationSeconds || 0);
+    if (isNaN(safeDurationSeconds) || safeDurationSeconds <= 0) {
+      safeDurationSeconds = 0.04;
+    }
 
     if (item && sequence && sequence.videoTracks) {
-      var trackIndex = 0;
-      try {
-        var videoCount = capitonFirstNumber([
-          capitonSafeNumber(sequence.videoTracks, "numTracks"),
-          capitonSafeNumber(sequence.videoTracks, "numItems"),
-          capitonSafeNumber(sequence.videoTracks, "length")
-        ]);
-        trackIndex = videoCount > 1 ? 1 : 0;
-      } catch (trackCountError) {}
+      var resolvedTrackIndex = capitonFindFreeOverlayTrackIndex(sequence, safeStartSeconds, safeStartSeconds + safeDurationSeconds);
 
-      var targetTrack = capitonGetCollectionItem(sequence.videoTracks, trackIndex);
+      var targetTrack = capitonGetCollectionItem(sequence.videoTracks, resolvedTrackIndex);
       if (!targetTrack) {
         targetTrack = capitonGetCollectionItem(sequence.videoTracks, 0);
+        resolvedTrackIndex = 0;
       }
 
       if (targetTrack && targetTrack.overwriteClip) {
         try {
           targetTrack.overwriteClip(item, safeStartSeconds);
           addedToTimeline = true;
+          usedTrackIndex = resolvedTrackIndex;
         } catch (overwriteError) {
           timelineMessage = " Görsel altyazı zaman çizelgesine eklenemedi: " + overwriteError.toString();
         }
@@ -590,6 +663,7 @@ function capitonImportOverlayFile(mediaPath, startSeconds) {
       addedToTimeline: addedToTimeline,
       mediaPath: mediaPath,
       startSeconds: safeStartSeconds,
+      trackIndex: usedTrackIndex,
       message: addedToTimeline
         ? "Stilli görsel altyazı içe aktarıldı ve zaman çizelgesine eklendi."
         : "Görsel altyazı içe aktarıldı." + timelineMessage
@@ -659,7 +733,7 @@ function capitonRefreshOverlayFile(mediaPath) {
   }
 }
 
-function capitonReplaceOverlayFile(previousMediaPath, nextMediaPath, startSeconds) {
+function capitonReplaceOverlayFile(previousMediaPath, nextMediaPath, fallbackStartSeconds, fallbackDurationSeconds) {
   try {
     if (!previousMediaPath || !nextMediaPath) {
       return capitonJson({ ok: false, message: "Yenilenecek veya yeni görsel altyazı yolu boş." });
@@ -671,7 +745,7 @@ function capitonReplaceOverlayFile(previousMediaPath, nextMediaPath, startSecond
 
     var item = capitonFindProjectItemByMediaPath(app.project.rootItem, previousMediaPath);
     if (!item) {
-      var importedResult = capitonImportOverlayFile(nextMediaPath, startSeconds);
+      var importedResult = capitonImportOverlayFile(nextMediaPath, fallbackStartSeconds, fallbackDurationSeconds);
       try {
         var parsed = JSON.parse(importedResult);
         parsed.replaced = false;

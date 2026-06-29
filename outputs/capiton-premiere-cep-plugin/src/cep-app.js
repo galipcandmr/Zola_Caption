@@ -375,6 +375,7 @@
     detectedLanguage: null,
     latestSrtPath: "",
     latestOverlayPath: "",
+    overlayTracksByLang: {},
     latestTimelineStartSeconds: 0,
     latestTimelineEndSeconds: 0,
     latestClipDurationSeconds: 0,
@@ -421,6 +422,9 @@
     els.settingsEngineDetails = document.querySelector("#settingsEngineDetails");
     els.settingsGoogleStatus = document.querySelector("#settingsGoogleStatus");
     els.settingsGoogleDetails = document.querySelector("#settingsGoogleDetails");
+    els.settingsGoogleApiKeyInput = document.querySelector("#settingsGoogleApiKeyInput");
+    els.settingsGoogleApiKeySaveBtn = document.querySelector("#settingsGoogleApiKeySaveBtn");
+    els.settingsGoogleSaveStatus = document.querySelector("#settingsGoogleSaveStatus");
     els.settingsTranslateUsage = document.querySelector("#settingsTranslateUsage");
     els.updateModal = document.querySelector("#updateModal");
     els.updateModalSummary = document.querySelector("#updateModalSummary");
@@ -440,14 +444,10 @@
     els.captionTable = document.querySelector("#captionTable");
     els.captionMeta = document.querySelector("#captionMeta");
     els.sequenceTitle = document.querySelector("#sequenceTitle");
-    els.costCard = document.querySelector("#costCard");
     els.logOutput = document.querySelector("#logOutput");
     els.analyzingLabel = document.querySelector("#analyzingLabel");
     els.fileInput = document.querySelector("#fileInput");
-    els.speechProvider = document.querySelector("#speechProvider");
     els.translateTargetInput = document.querySelector("#translateTargetInput");
-    els.durationInput = document.querySelector("#durationInput");
-    els.charInput = document.querySelector("#charInput");
     els.previewPrimary = document.querySelector("#previewPrimary");
     els.previewSecondary = document.querySelector("#previewSecondary");
     els.captionPreviewCard = document.querySelector("#captionPreviewCard");
@@ -512,6 +512,16 @@
     }
     if (els.refreshSettingsBtn) {
       els.refreshSettingsBtn.addEventListener("click", refreshSettingsStatus);
+    }
+    if (els.settingsGoogleApiKeySaveBtn) {
+      els.settingsGoogleApiKeySaveBtn.addEventListener("click", saveGoogleApiKey);
+    }
+    if (els.settingsGoogleApiKeyInput) {
+      els.settingsGoogleApiKeyInput.addEventListener("keydown", function (event) {
+        if (event.key === "Enter") {
+          saveGoogleApiKey();
+        }
+      });
     }
     if (els.settingsInstallUpdateBtn) {
       els.settingsInstallUpdateBtn.addEventListener("click", installAvailableUpdate);
@@ -679,12 +689,6 @@
       els.previewTextSelect.addEventListener("change", renderPresetPreview);
     }
 
-    [els.speechProvider, els.durationInput, els.charInput].forEach(function (element) {
-      if (!element) {
-        return;
-      }
-      element.addEventListener("input", renderCost);
-    });
     [
       els.fontInput,
       els.primaryColorInput,
@@ -715,7 +719,6 @@
     renderScenarios();
     renderPresets();
     renderCaptions();
-    renderCost();
     renderAudioState();
     renderLanguageOptions();
     renderMogrtOptions();
@@ -798,6 +801,52 @@
           : "Çeviri için yerel motor .env dosyasına Google Translate API anahtarı eklenmeli.";
       }
     });
+  }
+
+  function saveGoogleApiKey() {
+    if (!els.settingsGoogleApiKeyInput) {
+      return;
+    }
+
+    var apiKey = els.settingsGoogleApiKeyInput.value.trim();
+    if (!apiKey) {
+      showSettingsGoogleSaveStatus("Önce API anahtarını yapıştır.", false);
+      return;
+    }
+
+    if (els.settingsGoogleApiKeySaveBtn) {
+      els.settingsGoogleApiKeySaveBtn.disabled = true;
+    }
+    showSettingsGoogleSaveStatus("Kaydediliyor...", null);
+
+    callEngine("/settings/google-api-key", { apiKey: apiKey }, function (result) {
+      if (els.settingsGoogleApiKeySaveBtn) {
+        els.settingsGoogleApiKeySaveBtn.disabled = false;
+      }
+
+      if (!result.ok) {
+        showSettingsGoogleSaveStatus(result.message || "API anahtarı kaydedilemedi.", false);
+        return;
+      }
+
+      els.settingsGoogleApiKeyInput.value = "";
+      showSettingsGoogleSaveStatus(result.message || "API anahtarı kaydedildi.", true);
+      refreshSettingsStatus();
+    });
+  }
+
+  function showSettingsGoogleSaveStatus(message, isSuccess) {
+    if (!els.settingsGoogleSaveStatus) {
+      return;
+    }
+    els.settingsGoogleSaveStatus.hidden = false;
+    els.settingsGoogleSaveStatus.textContent = message;
+    els.settingsGoogleSaveStatus.classList.remove("is-success", "is-error");
+    if (isSuccess === true) {
+      els.settingsGoogleSaveStatus.classList.add("is-success");
+    } else if (isSuccess === false) {
+      els.settingsGoogleSaveStatus.classList.add("is-error");
+    }
   }
 
   function checkForUpdates(options) {
@@ -1371,7 +1420,6 @@
         if (field === "text" && isTranslationActive()) {
           state.captions[index].translationStale = true;
         }
-        updateCharacterEstimate();
         renderPresetPreview();
       });
     });
@@ -1388,7 +1436,6 @@
       });
     });
 
-    updateCharacterEstimate();
     renderPreviewTextOptions();
   }
 
@@ -1619,6 +1666,7 @@
         state.sourceCaptions = copy(generatedCaptions);
         state.latestSrtPath = engineResult.files && engineResult.files.srtPath ? engineResult.files.srtPath : "";
         state.latestOverlayPath = "";
+        state.overlayTracksByLang = {};
         state.latestTimelineStartSeconds = Number(sourceResult.timelineStartSeconds || 0);
         state.latestTimelineEndSeconds = Number(sourceResult.timelineEndSeconds || 0);
         state.latestClipDurationSeconds = Math.max(
@@ -1886,7 +1934,7 @@
     callEngine("/render-overlay", payload, callback);
   }
 
-  function importOverlayFile(mediaPath, startSeconds, callback) {
+  function importOverlayFile(mediaPath, startSeconds, durationSeconds, callback) {
     if (!window.__adobe_cep__ || typeof window.__adobe_cep__.evalScript !== "function") {
       callback({
         ok: false,
@@ -1896,7 +1944,13 @@
     }
 
     window.__adobe_cep__.evalScript(
-      'capitonImportOverlayFile("' + escapeForJsx(mediaPath) + '", ' + Number(startSeconds || 0) + ')',
+      'capitonImportOverlayFile("' +
+        escapeForJsx(mediaPath) +
+        '", ' +
+        Number(startSeconds || 0) +
+        ', ' +
+        Number(durationSeconds || 0) +
+        ')',
       function (raw) {
         try {
           callback(JSON.parse(raw));
@@ -1931,7 +1985,7 @@
     });
   }
 
-  function replaceOverlayFile(previousPath, mediaPath, startSeconds, callback) {
+  function replaceOverlayFile(previousPath, mediaPath, fallbackStartSeconds, fallbackDurationSeconds, callback) {
     if (!window.__adobe_cep__ || typeof window.__adobe_cep__.evalScript !== "function") {
       callback({
         ok: false,
@@ -1946,7 +2000,9 @@
         '", "' +
         escapeForJsx(mediaPath) +
         '", ' +
-        Number(startSeconds || 0) +
+        Number(fallbackStartSeconds || 0) +
+        ', ' +
+        Number(fallbackDurationSeconds || 0) +
         ')',
       function (raw) {
         try {
@@ -2094,14 +2150,13 @@
 
   function applySynchronizedOverlayToTimeline(options) {
     var forceImport = !!(options && options.forceImport);
-    var existingOverlayPath = forceImport ? "" : state.latestOverlayPath;
+    var langKey = getActiveOverlayLanguageKey();
+    var existingEntry = state.overlayTracksByLang[langKey] || null;
     beginApplyProgress(forceImport ? "Altyazı yeniden üretilip zaman çizelgesine basılıyor" : "Kelime vurgulu altyazı render ediliyor");
     writeLog(
-      (forceImport
-        ? "Yeni senkron kelime vurgulu altyazı render ediliyor; timeline'a yeniden eklenecek."
-        : existingOverlayPath
-        ? "Senkron görsel altyazı yeniden render ediliyor; zaman çizelgesindeki mevcut dosya güncellenecek."
-        : "Senkron kelime vurgulu görsel altyazı render ediliyor.") +
+      (existingEntry
+        ? "Bu dil için senkron görsel altyazı yeniden render ediliyor; zaman çizelgesindeki mevcut track güncellenecek."
+        : "Senkron kelime vurgulu görsel altyazı render ediliyor; bu dil için zaman çizelgesinde yeni bir track kullanılacak.") +
         "\nEkrandaki kelime: " +
         state.wordsPerScreen
     );
@@ -2112,44 +2167,51 @@
         return;
       }
 
-      if (existingOverlayPath) {
-        replaceOverlayFile(existingOverlayPath, overlayResult.overlayPath, state.latestTimelineStartSeconds, function (replaceResult) {
-          finishApplyProgress();
-          if (replaceResult.ok) {
-            state.latestOverlayPath = overlayResult.overlayPath;
+      if (existingEntry) {
+        replaceOverlayFile(
+          existingEntry.mediaPath,
+          overlayResult.overlayPath,
+          state.latestTimelineStartSeconds,
+          state.latestClipDurationSeconds,
+          function (replaceResult) {
+            finishApplyProgress();
+            if (replaceResult.ok) {
+              state.latestOverlayPath = overlayResult.overlayPath;
+              state.overlayTracksByLang[langKey] = {
+                mediaPath: overlayResult.overlayPath,
+                trackIndex: typeof replaceResult.trackIndex === "number" ? replaceResult.trackIndex : existingEntry.trackIndex,
+                startSeconds: state.latestTimelineStartSeconds
+              };
+            }
+            writeLog(
+              (overlayResult.message || "Senkron görsel altyazı güncellendi.") +
+                "\n" +
+                (replaceResult.message || "Premiere medya değiştirme sonucu alınamadı.")
+            );
           }
-          writeLog(
-            (overlayResult.message || "Senkron görsel altyazı güncellendi.") +
-              "\n" +
-              (replaceResult.message || "Premiere medya değiştirme sonucu alınamadı.")
-          );
-        });
+        );
         return;
       }
 
-      writeLog((overlayResult.message || "Senkron görsel altyazı üretildi.") + "\nPremiere zaman çizelgesine ekleniyor...");
-      importOverlayFile(overlayResult.overlayPath, state.latestTimelineStartSeconds, function (result) {
-        finishApplyProgress();
-        if (result.ok) {
-          state.latestOverlayPath = overlayResult.overlayPath;
+      writeLog((overlayResult.message || "Senkron görsel altyazı üretildi.") + "\nPremiere zaman çizelgesinde boş bir track aranıp ekleniyor...");
+      importOverlayFile(
+        overlayResult.overlayPath,
+        state.latestTimelineStartSeconds,
+        state.latestClipDurationSeconds,
+        function (result) {
+          finishApplyProgress();
+          if (result.ok) {
+            state.latestOverlayPath = overlayResult.overlayPath;
+            state.overlayTracksByLang[langKey] = {
+              mediaPath: overlayResult.overlayPath,
+              trackIndex: result.trackIndex,
+              startSeconds: state.latestTimelineStartSeconds
+            };
+          }
+          writeLog(result.message || "Görsel altyazı içe aktarma sonucu alınamadı.");
         }
-        writeLog(result.message || "Görsel altyazı içe aktarma sonucu alınamadı.");
-      });
+      );
     });
-  }
-
-  function renderCost() {
-    var durationMinutes = Number(els.durationInput.value || 0);
-    var characterCount = Number(els.charInput.value || 0);
-    var speechCost = els.speechProvider.value === "openai-whisper" ? durationMinutes * 0.017 : 0;
-    var translationCost = 0;
-
-    els.costCard.innerHTML =
-      "<strong>$" +
-      (speechCost + translationCost).toFixed(3) +
-      " tahmini</strong><br>Transkripsiyon: $" +
-      speechCost.toFixed(3) +
-      "<br>Çeviri: lokal İngilizce $0.000";
   }
 
   function renderPresetPreview() {
@@ -2592,6 +2654,13 @@
 
   function isTranslationActive() {
     return !!findTranslationLanguage(state.translationTarget);
+  }
+
+  function getActiveOverlayLanguageKey() {
+    if (isTranslationActive()) {
+      return "translation:" + state.translationTarget;
+    }
+    return "source:" + (state.scenario.sourceLang || "primary");
   }
 
   function shouldShowTranslationField() {
@@ -3246,14 +3315,6 @@
       return "Render edilmiş altyazı";
     }
     return "Animasyonlu altyazı";
-  }
-
-  function updateCharacterEstimate() {
-    var total = state.captions.reduce(function (sum, caption) {
-      return sum + caption.text.length + (caption.translation || "").length;
-    }, 0);
-    els.charInput.value = total;
-    renderCost();
   }
 
   function renderPreviewTextOptions() {

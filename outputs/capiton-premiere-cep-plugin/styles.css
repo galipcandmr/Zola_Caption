@@ -398,32 +398,6 @@ input[type="color"]::-webkit-color-swatch {
   font-weight: 900;
 }
 
-.cost-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  margin-top: 14px;
-}
-
-.cost-grid label {
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 800;
-}
-
-.cost-grid input {
-  margin-top: 6px;
-}
-
-.cost-card {
-  margin-top: 10px;
-  padding: 10px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  color: var(--muted);
-  line-height: 1.5;
-}
-
 .analyzing-screen {
   display: grid;
   min-height: calc(100vh - 58px);
@@ -1121,6 +1095,43 @@ input[type="color"]::-webkit-color-swatch {
   grid-column: 2;
   justify-self: start;
   margin-top: 6px;
+}
+
+.settings-row-field {
+  grid-column: 2;
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.settings-row-field input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.settings-row-field .settings-row-action {
+  grid-column: auto;
+  margin-top: 0;
+}
+
+.settings-row-feedback {
+  grid-column: 2;
+  margin-top: 4px;
+  font-weight: 700;
+}
+
+.settings-row-feedback.is-success {
+  color: var(--accent, #5fe39a);
+}
+
+.settings-row-feedback.is-error {
+  color: #ff6b6b;
 }
 
 .modal-eyebrow {

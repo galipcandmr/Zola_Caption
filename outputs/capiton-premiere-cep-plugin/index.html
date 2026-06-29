@@ -68,38 +68,19 @@
           <div class="setup-actions">
             <div>
               <span id="audioStatus">Sekanstaki ses kanalları otomatik okunuyor.</span>
-              <span class="subtle" id="setupCost">Lokal Whisper ile transkripsiyon maliyeti $0.</span>
             </div>
             <button class="primary" id="transcribeTimelineBtn">Altyazı üret</button>
           </div>
         </section>
 
         <section class="engine-card">
-          <div class="section-title">Motor</div>
-          <label class="field-label" for="speechProvider">Transkripsiyon</label>
-          <select id="speechProvider">
-            <option value="local-whisper">Lokal Whisper</option>
-            <option value="openai-whisper">OpenAI Whisper / gerçek zamanlı</option>
-            <option value="premiere-native">Premiere yerel transkript</option>
-            <option value="manual-srt">Hazır SRT/VTT</option>
-          </select>
+          <div class="section-title">Çıkış</div>
           <label class="field-label" for="outputModeInput">Zaman çizelgesine gönderme şekli</label>
           <select id="outputModeInput">
             <option value="mogrt">Animasyonlu altyazı</option>
             <option value="overlay">Render edilmiş altyazı</option>
             <option value="srt">Premiere altyazısı</option>
           </select>
-          <div class="cost-grid">
-            <label>
-              <span>Dakika</span>
-              <input id="durationInput" type="number" min="1" value="30">
-            </label>
-            <label>
-              <span>Karakter</span>
-              <input id="charInput" type="number" min="0" value="18000">
-            </label>
-          </div>
-          <div class="cost-card" id="costCard"></div>
         </section>
       </main>
 
@@ -332,6 +313,11 @@
               <span>Google Translate</span>
               <strong id="settingsGoogleStatus">Kontrol ediliyor</strong>
               <small id="settingsGoogleDetails">API anahtarı durumu okunuyor.</small>
+              <div class="settings-row-field">
+                <input type="password" id="settingsGoogleApiKeyInput" placeholder="Google Translate API anahtarı" autocomplete="off" spellcheck="false">
+                <button class="primary settings-row-action" id="settingsGoogleApiKeySaveBtn" type="button">Kaydet</button>
+              </div>
+              <small id="settingsGoogleSaveStatus" class="settings-row-feedback" hidden></small>
             </div>
             <div class="settings-row">
               <span>Çeviri kullanımı</span>

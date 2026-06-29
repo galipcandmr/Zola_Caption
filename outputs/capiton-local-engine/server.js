@@ -12,8 +12,9 @@ const ROOT = __dirname;
 const PORT = Number(process.env.CAPITON_ENGINE_PORT || 17771);
 const WORK_DIR = path.join(ROOT, "work");
 const DEFAULT_MODEL = path.join(ROOT, "models", "ggml-small.bin");
-loadEnvFile(path.join(ROOT, ".env"));
-const GOOGLE_TRANSLATE_API_KEY =
+const ENV_PATH = path.join(ROOT, ".env");
+loadEnvFile(ENV_PATH);
+let GOOGLE_TRANSLATE_API_KEY =
   process.env.CAPITON_GOOGLE_TRANSLATE_API_KEY || process.env.GOOGLE_TRANSLATE_API_KEY || "";
 
 fs.mkdirSync(WORK_DIR, { recursive: true });
@@ -70,6 +71,13 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === "POST" && req.url === "/settings/google-api-key") {
+      const body = await readJson(req);
+      const result = saveGoogleApiKey(body);
+      sendJson(res, result.ok ? 200 : 422, result);
+      return;
+    }
+
     sendJson(res, 404, { ok: false, message: "Endpoint bulunamadı." });
   } catch (error) {
     sendJson(res, 500, { ok: false, message: error.message || String(error) });
@@ -103,6 +111,65 @@ function loadEnvFile(filePath) {
     if (key && process.env[key] === undefined) {
       process.env[key] = value;
     }
+  }
+}
+
+function writeEnvValue(filePath, key, value) {
+  let lines = [];
+  if (fs.existsSync(filePath)) {
+    lines = fs.readFileSync(filePath, "utf8").split(/\r?\n/);
+  }
+
+  let replaced = false;
+  const nextLines = lines.map((line) => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) {
+      return line;
+    }
+    const separator = trimmed.indexOf("=");
+    if (separator <= 0) {
+      return line;
+    }
+    if (trimmed.slice(0, separator).trim() === key) {
+      replaced = true;
+      return key + "=" + value;
+    }
+    return line;
+  });
+
+  if (!replaced) {
+    if (nextLines.length && nextLines[nextLines.length - 1].trim() !== "") {
+      nextLines.push("");
+    }
+    nextLines.push(key + "=" + value);
+  }
+
+  const content = nextLines.join("\n").replace(/\n+$/, "\n");
+  fs.writeFileSync(filePath, content.endsWith("\n") ? content : content + "\n", { mode: 0o600 });
+  fs.chmodSync(filePath, 0o600);
+}
+
+function saveGoogleApiKey(body) {
+  const apiKey = String((body && body.apiKey) || "").trim();
+  if (!apiKey) {
+    return { ok: false, code: "EMPTY_API_KEY", message: "Google Translate API anahtarı boş olamaz." };
+  }
+
+  try {
+    writeEnvValue(ENV_PATH, "CAPITON_GOOGLE_TRANSLATE_API_KEY", apiKey);
+    process.env.CAPITON_GOOGLE_TRANSLATE_API_KEY = apiKey;
+    GOOGLE_TRANSLATE_API_KEY = apiKey;
+    return {
+      ok: true,
+      googleTranslateConfigured: true,
+      message: "Google Translate API anahtarı kaydedildi."
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      code: "ENV_WRITE_FAILED",
+      message: "API anahtarı .env dosyasına yazılamadı: " + (error.message || String(error))
+    };
   }
 }
 
