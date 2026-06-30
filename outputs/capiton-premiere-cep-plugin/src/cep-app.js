@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  var CURRENT_VERSION = "v1.0.0-beta";
+  var CURRENT_VERSION = "v1.1.1";
 
   var scenarios = [
     {
@@ -375,7 +375,6 @@
     detectedLanguage: null,
     latestSrtPath: "",
     latestOverlayPath: "",
-    overlayTracksByLang: {},
     latestTimelineStartSeconds: 0,
     latestTimelineEndSeconds: 0,
     latestClipDurationSeconds: 0,
@@ -392,6 +391,7 @@
     state.customPresets = loadCustomPresets();
     seedMockCaptionsForBrowserPreview();
     renderAll();
+    loadSystemFonts();
     loadHostBridge(function (result) {
       if (!result.ok) {
         writeLog(result.message);
@@ -418,19 +418,14 @@
     els.settingsUpdateStatus = document.querySelector("#settingsUpdateStatus");
     els.settingsUpdateDetails = document.querySelector("#settingsUpdateDetails");
     els.settingsInstallUpdateBtn = document.querySelector("#settingsInstallUpdateBtn");
-    els.settingsUpdateProgress = document.querySelector("#settingsUpdateProgress");
     els.settingsEngineStatus = document.querySelector("#settingsEngineStatus");
     els.settingsEngineDetails = document.querySelector("#settingsEngineDetails");
     els.settingsGoogleStatus = document.querySelector("#settingsGoogleStatus");
     els.settingsGoogleDetails = document.querySelector("#settingsGoogleDetails");
-    els.settingsGoogleApiKeyInput = document.querySelector("#settingsGoogleApiKeyInput");
-    els.settingsGoogleApiKeySaveBtn = document.querySelector("#settingsGoogleApiKeySaveBtn");
-    els.settingsGoogleSaveStatus = document.querySelector("#settingsGoogleSaveStatus");
     els.settingsTranslateUsage = document.querySelector("#settingsTranslateUsage");
     els.updateModal = document.querySelector("#updateModal");
     els.updateModalSummary = document.querySelector("#updateModalSummary");
     els.updateNotesList = document.querySelector("#updateNotesList");
-    els.updateModalProgress = document.querySelector("#updateModalProgress");
     els.installUpdateBtn = document.querySelector("#installUpdateBtn");
     els.deferUpdateBtn = document.querySelector("#deferUpdateBtn");
     els.deferUpdateCloseBtn = document.querySelector("#deferUpdateCloseBtn");
@@ -446,10 +441,14 @@
     els.captionTable = document.querySelector("#captionTable");
     els.captionMeta = document.querySelector("#captionMeta");
     els.sequenceTitle = document.querySelector("#sequenceTitle");
+    els.costCard = document.querySelector("#costCard");
     els.logOutput = document.querySelector("#logOutput");
     els.analyzingLabel = document.querySelector("#analyzingLabel");
     els.fileInput = document.querySelector("#fileInput");
+    els.speechProvider = document.querySelector("#speechProvider");
     els.translateTargetInput = document.querySelector("#translateTargetInput");
+    els.durationInput = document.querySelector("#durationInput");
+    els.charInput = document.querySelector("#charInput");
     els.previewPrimary = document.querySelector("#previewPrimary");
     els.previewSecondary = document.querySelector("#previewSecondary");
     els.captionPreviewCard = document.querySelector("#captionPreviewCard");
@@ -466,6 +465,7 @@
     els.shadowEnabledInput = document.querySelector("#shadowEnabledInput");
     els.positionXInput = document.querySelector("#positionXInput");
     els.positionYInput = document.querySelector("#positionYInput");
+    els.positionMap = document.querySelector("#positionMap");
     els.paddingLeftInput = document.querySelector("#paddingLeftInput");
     els.paddingRightInput = document.querySelector("#paddingRightInput");
     els.scaleInput = document.querySelector("#scaleInput");
@@ -514,16 +514,6 @@
     }
     if (els.refreshSettingsBtn) {
       els.refreshSettingsBtn.addEventListener("click", refreshSettingsStatus);
-    }
-    if (els.settingsGoogleApiKeySaveBtn) {
-      els.settingsGoogleApiKeySaveBtn.addEventListener("click", saveGoogleApiKey);
-    }
-    if (els.settingsGoogleApiKeyInput) {
-      els.settingsGoogleApiKeyInput.addEventListener("keydown", function (event) {
-        if (event.key === "Enter") {
-          saveGoogleApiKey();
-        }
-      });
     }
     if (els.settingsInstallUpdateBtn) {
       els.settingsInstallUpdateBtn.addEventListener("click", installAvailableUpdate);
@@ -691,6 +681,12 @@
       els.previewTextSelect.addEventListener("change", renderPresetPreview);
     }
 
+    [els.speechProvider, els.durationInput, els.charInput].forEach(function (element) {
+      if (!element) {
+        return;
+      }
+      element.addEventListener("input", renderCost);
+    });
     [
       els.fontInput,
       els.primaryColorInput,
@@ -715,12 +711,35 @@
       element.addEventListener("input", updatePresetFromControls);
       element.addEventListener("change", updatePresetFromControls);
     });
+
+    if (els.positionMap) {
+      els.positionMap.addEventListener("click", function (e) {
+        var btn = e.target.closest(".pos-btn");
+        if (!btn) { return; }
+        var y = Number(btn.getAttribute("data-pos-y"));
+        if (els.positionYInput) {
+          els.positionYInput.value = y;
+        }
+        updatePresetFromControls();
+        syncPositionMap();
+        renderPresetPreview();
+      });
+    }
+
+    if (els.fontInput) {
+      els.fontInput.addEventListener("change", function () {
+        checkFontAvailability();
+        renderPresetPreview();
+      });
+    }
+
   }
 
   function renderAll() {
     renderScenarios();
     renderPresets();
     renderCaptions();
+    renderCost();
     renderAudioState();
     renderLanguageOptions();
     renderMogrtOptions();
@@ -803,52 +822,6 @@
           : "Çeviri için yerel motor .env dosyasına Google Translate API anahtarı eklenmeli.";
       }
     });
-  }
-
-  function saveGoogleApiKey() {
-    if (!els.settingsGoogleApiKeyInput) {
-      return;
-    }
-
-    var apiKey = els.settingsGoogleApiKeyInput.value.trim();
-    if (!apiKey) {
-      showSettingsGoogleSaveStatus("Önce API anahtarını yapıştır.", false);
-      return;
-    }
-
-    if (els.settingsGoogleApiKeySaveBtn) {
-      els.settingsGoogleApiKeySaveBtn.disabled = true;
-    }
-    showSettingsGoogleSaveStatus("Kaydediliyor...", null);
-
-    callEngine("/settings/google-api-key", { apiKey: apiKey }, function (result) {
-      if (els.settingsGoogleApiKeySaveBtn) {
-        els.settingsGoogleApiKeySaveBtn.disabled = false;
-      }
-
-      if (!result.ok) {
-        showSettingsGoogleSaveStatus(result.message || "API anahtarı kaydedilemedi.", false);
-        return;
-      }
-
-      els.settingsGoogleApiKeyInput.value = "";
-      showSettingsGoogleSaveStatus(result.message || "API anahtarı kaydedildi.", true);
-      refreshSettingsStatus();
-    });
-  }
-
-  function showSettingsGoogleSaveStatus(message, isSuccess) {
-    if (!els.settingsGoogleSaveStatus) {
-      return;
-    }
-    els.settingsGoogleSaveStatus.hidden = false;
-    els.settingsGoogleSaveStatus.textContent = message;
-    els.settingsGoogleSaveStatus.classList.remove("is-success", "is-error");
-    if (isSuccess === true) {
-      els.settingsGoogleSaveStatus.classList.add("is-success");
-    } else if (isSuccess === false) {
-      els.settingsGoogleSaveStatus.classList.add("is-error");
-    }
   }
 
   function checkForUpdates(options) {
@@ -960,45 +933,6 @@
     renderUpdateStatus();
   }
 
-  var updateStatusPollTimer = null;
-
-  function startUpdateStatusPolling() {
-    stopUpdateStatusPolling();
-    pollUpdateStatusOnce();
-    updateStatusPollTimer = setInterval(pollUpdateStatusOnce, 1000);
-  }
-
-  function stopUpdateStatusPolling() {
-    if (updateStatusPollTimer) {
-      clearInterval(updateStatusPollTimer);
-      updateStatusPollTimer = null;
-    }
-  }
-
-  function pollUpdateStatusOnce() {
-    requestJson("http://127.0.0.1:17771/update-status", function (result) {
-      if (!result || !result.ok || !result.data) {
-        return;
-      }
-      showUpdateProgress(result.data.message || "");
-    });
-  }
-
-  function showUpdateProgress(message) {
-    [els.settingsUpdateProgress, els.updateModalProgress].forEach(function (el) {
-      if (!el) {
-        return;
-      }
-      if (!message) {
-        el.hidden = true;
-        el.textContent = "";
-        return;
-      }
-      el.hidden = false;
-      el.textContent = message;
-    });
-  }
-
   function installAvailableUpdate() {
     var info = state.updateInfo;
     if (!info || !info.downloadUrl) {
@@ -1011,8 +945,6 @@
       els.settingsInstallUpdateBtn.textContent = "Yükleniyor";
     }
     writeLog("Güncelleme indiriliyor ve kuruluyor: v" + info.latest + ". Lütfen işlem bitene kadar Premiere'i kapatma.");
-    showUpdateProgress("Güncelleme başlatılıyor...");
-    startUpdateStatusPolling();
 
     callEngine(
       "/install-update",
@@ -1022,13 +954,11 @@
         extensionPath: getExtensionRootPath()
       },
       function (result) {
-        stopUpdateStatusPolling();
         if (els.settingsInstallUpdateBtn) {
           els.settingsInstallUpdateBtn.disabled = false;
           els.settingsInstallUpdateBtn.textContent = "Güncellemeyi yükle";
         }
         if (!result.ok) {
-          showUpdateProgress("");
           writeLog(result.message || "Güncelleme otomatik kurulamadı.");
           if (window.cep && window.cep.util && typeof window.cep.util.openURLInDefaultBrowser === "function") {
             writeLog("Manuel paket adresi açılıyor. Otomatik kurulum için yerel motor açık olmalı.");
@@ -1037,7 +967,6 @@
           return;
         }
 
-        showUpdateProgress("Tamamlandı.");
         writeLog(
           (result.message || "Güncelleme kuruldu.") +
             "\nPanel: " +
@@ -1149,6 +1078,7 @@
   }
 
   function activateStyleTab(name) {
+    updatePresetFromControls();
     state.activeStyleTab = name || "preset";
     Array.prototype.forEach.call(els.styleTabs || [], function (tab) {
       tab.className = "style-tab" + (tab.getAttribute("data-style-tab") === name ? " active" : "");
@@ -1156,6 +1086,7 @@
     Array.prototype.forEach.call(els.stylePanels || [], function (panel) {
       panel.className = "style-panel-content" + (panel.getAttribute("data-style-panel") === name ? " active" : "");
     });
+    syncPresetControls();
     renderPresetPreview();
   }
 
@@ -1466,6 +1397,7 @@
         if (field === "text" && isTranslationActive()) {
           state.captions[index].translationStale = true;
         }
+        updateCharacterEstimate();
         renderPresetPreview();
       });
     });
@@ -1482,6 +1414,7 @@
       });
     });
 
+    updateCharacterEstimate();
     renderPreviewTextOptions();
   }
 
@@ -1712,7 +1645,6 @@
         state.sourceCaptions = copy(generatedCaptions);
         state.latestSrtPath = engineResult.files && engineResult.files.srtPath ? engineResult.files.srtPath : "";
         state.latestOverlayPath = "";
-        state.overlayTracksByLang = {};
         state.latestTimelineStartSeconds = Number(sourceResult.timelineStartSeconds || 0);
         state.latestTimelineEndSeconds = Number(sourceResult.timelineEndSeconds || 0);
         state.latestClipDurationSeconds = Math.max(
@@ -1890,6 +1822,93 @@
     xhr.send();
   }
 
+  function callEngineSystemFonts(callback) {
+    var xhr = new XMLHttpRequest();
+    xhr.open("GET", "http://127.0.0.1:17771/system-fonts", true);
+    xhr.onreadystatechange = function () {
+      if (xhr.readyState !== 4) {
+        return;
+      }
+      try {
+        callback(JSON.parse(xhr.responseText || "{}"));
+      } catch (error) {
+        callback({ ok: false, fonts: [] });
+      }
+    };
+    xhr.onerror = function () {
+      callback({ ok: false, fonts: [] });
+    };
+    xhr.send();
+  }
+
+  function loadSystemFonts() {
+    callEngineSystemFonts(function (result) {
+      state.systemFonts = result && result.ok && result.fonts ? result.fonts : [];
+      populateFontSelect(state.preset.fontFamily || "Inter");
+    });
+  }
+
+  function populateFontSelect(currentValue) {
+    var select = els.fontInput;
+    if (!select || select.tagName !== "SELECT") {
+      return;
+    }
+    var fonts = state.systemFonts || [];
+    var fragment = document.createDocumentFragment();
+    var isInstalled = false;
+
+    for (var i = 0; i < fonts.length; i += 1) {
+      if (fonts[i] === currentValue) {
+        isInstalled = true;
+      }
+      var opt = document.createElement("option");
+      opt.value = fonts[i];
+      opt.textContent = fonts[i];
+      fragment.appendChild(opt);
+    }
+
+    select.innerHTML = "";
+    if (!isInstalled && currentValue) {
+      var missing = document.createElement("option");
+      missing.value = currentValue;
+      missing.textContent = currentValue + " (yüklü değil)";
+      select.appendChild(missing);
+    }
+    select.appendChild(fragment);
+    select.value = currentValue;
+
+    var warningEl = document.querySelector("#fontWarning");
+    if (warningEl) {
+      if (!isInstalled && currentValue && fonts.length) {
+        warningEl.classList.remove("hidden-field");
+        warningEl.textContent = '"' + currentValue + '" bu bilgisayarda yüklü değil. Listeden yüklü bir yazı tipi seçin.';
+      } else {
+        warningEl.classList.add("hidden-field");
+        warningEl.textContent = "";
+      }
+    }
+  }
+
+  function checkFontAvailability() {
+    if (!els.fontInput || els.fontInput.tagName !== "SELECT") {
+      return;
+    }
+    var fonts = state.systemFonts || [];
+    var currentFont = els.fontInput.value;
+    var warningEl = document.querySelector("#fontWarning");
+    if (!warningEl || !fonts.length) {
+      return;
+    }
+    var isInstalled = fonts.indexOf(currentFont) !== -1;
+    if (isInstalled) {
+      warningEl.classList.add("hidden-field");
+      warningEl.textContent = "";
+    } else {
+      warningEl.classList.remove("hidden-field");
+      warningEl.textContent = '"' + currentFont + '" bu bilgisayarda yüklü değil. Listeden yüklü bir yazı tipi seçin.';
+    }
+  }
+
   function requestJson(url, callback) {
     var xhr = new XMLHttpRequest();
     xhr.open("GET", url + (url.indexOf("?") === -1 ? "?t=" : "&t=") + Date.now(), true);
@@ -1990,13 +2009,7 @@
     }
 
     window.__adobe_cep__.evalScript(
-      'capitonImportOverlayFile("' +
-        escapeForJsx(mediaPath) +
-        '", ' +
-        Number(startSeconds || 0) +
-        ', ' +
-        Number(durationSeconds || 0) +
-        ')',
+      'capitonImportOverlayFile("' + escapeForJsx(mediaPath) + '", ' + Number(startSeconds || 0) + ', ' + Number(durationSeconds || 0) + ')',
       function (raw) {
         try {
           callback(JSON.parse(raw));
@@ -2031,7 +2044,7 @@
     });
   }
 
-  function replaceOverlayFile(previousPath, mediaPath, fallbackStartSeconds, fallbackDurationSeconds, callback) {
+  function replaceOverlayFile(previousPath, mediaPath, startSeconds, callback) {
     if (!window.__adobe_cep__ || typeof window.__adobe_cep__.evalScript !== "function") {
       callback({
         ok: false,
@@ -2046,9 +2059,7 @@
         '", "' +
         escapeForJsx(mediaPath) +
         '", ' +
-        Number(fallbackStartSeconds || 0) +
-        ', ' +
-        Number(fallbackDurationSeconds || 0) +
+        Number(startSeconds || 0) +
         ')',
       function (raw) {
         try {
@@ -2196,13 +2207,14 @@
 
   function applySynchronizedOverlayToTimeline(options) {
     var forceImport = !!(options && options.forceImport);
-    var langKey = getActiveOverlayLanguageKey();
-    var existingEntry = state.overlayTracksByLang[langKey] || null;
+    var existingOverlayPath = forceImport ? "" : state.latestOverlayPath;
     beginApplyProgress(forceImport ? "Altyazı yeniden üretilip zaman çizelgesine basılıyor" : "Kelime vurgulu altyazı render ediliyor");
     writeLog(
-      (existingEntry
-        ? "Bu dil için senkron görsel altyazı yeniden render ediliyor; zaman çizelgesindeki mevcut track güncellenecek."
-        : "Senkron kelime vurgulu görsel altyazı render ediliyor; bu dil için zaman çizelgesinde yeni bir track kullanılacak.") +
+      (forceImport
+        ? "Yeni senkron kelime vurgulu altyazı render ediliyor; timeline'a yeniden eklenecek."
+        : existingOverlayPath
+        ? "Senkron görsel altyazı yeniden render ediliyor; zaman çizelgesindeki mevcut dosya güncellenecek."
+        : "Senkron kelime vurgulu görsel altyazı render ediliyor.") +
         "\nEkrandaki kelime: " +
         state.wordsPerScreen
     );
@@ -2213,51 +2225,45 @@
         return;
       }
 
-      if (existingEntry) {
-        replaceOverlayFile(
-          existingEntry.mediaPath,
-          overlayResult.overlayPath,
-          state.latestTimelineStartSeconds,
-          state.latestClipDurationSeconds,
-          function (replaceResult) {
-            finishApplyProgress();
-            if (replaceResult.ok) {
-              state.latestOverlayPath = overlayResult.overlayPath;
-              state.overlayTracksByLang[langKey] = {
-                mediaPath: overlayResult.overlayPath,
-                trackIndex: typeof replaceResult.trackIndex === "number" ? replaceResult.trackIndex : existingEntry.trackIndex,
-                startSeconds: state.latestTimelineStartSeconds
-              };
-            }
-            writeLog(
-              (overlayResult.message || "Senkron görsel altyazı güncellendi.") +
-                "\n" +
-                (replaceResult.message || "Premiere medya değiştirme sonucu alınamadı.")
-            );
+      if (existingOverlayPath) {
+        replaceOverlayFile(existingOverlayPath, overlayResult.overlayPath, state.latestTimelineStartSeconds, function (replaceResult) {
+          finishApplyProgress();
+          if (replaceResult.ok) {
+            state.latestOverlayPath = overlayResult.overlayPath;
           }
-        );
+          writeLog(
+            (overlayResult.message || "Senkron görsel altyazı güncellendi.") +
+              "\n" +
+              (replaceResult.message || "Premiere medya değiştirme sonucu alınamadı.")
+          );
+        });
         return;
       }
 
-      writeLog((overlayResult.message || "Senkron görsel altyazı üretildi.") + "\nPremiere zaman çizelgesinde boş bir track aranıp ekleniyor...");
-      importOverlayFile(
-        overlayResult.overlayPath,
-        state.latestTimelineStartSeconds,
-        state.latestClipDurationSeconds,
-        function (result) {
-          finishApplyProgress();
-          if (result.ok) {
-            state.latestOverlayPath = overlayResult.overlayPath;
-            state.overlayTracksByLang[langKey] = {
-              mediaPath: overlayResult.overlayPath,
-              trackIndex: result.trackIndex,
-              startSeconds: state.latestTimelineStartSeconds
-            };
-          }
-          writeLog(result.message || "Görsel altyazı içe aktarma sonucu alınamadı.");
+      writeLog((overlayResult.message || "Senkron görsel altyazı üretildi.") + "\nPremiere zaman çizelgesine ekleniyor...");
+      importOverlayFile(overlayResult.overlayPath, state.latestTimelineStartSeconds, 0, function (result) {
+        finishApplyProgress();
+        if (result.ok) {
+          state.latestOverlayPath = overlayResult.overlayPath;
         }
-      );
+        writeLog(result.message || "Görsel altyazı içe aktarma sonucu alınamadı.");
+      });
     });
+  }
+
+
+  function renderCost() {
+    var durationMinutes = Number(els.durationInput.value || 0);
+    var characterCount = Number(els.charInput.value || 0);
+    var speechCost = els.speechProvider.value === "openai-whisper" ? durationMinutes * 0.017 : 0;
+    var translationCost = 0;
+
+    els.costCard.innerHTML =
+      "<strong>$" +
+      (speechCost + translationCost).toFixed(3) +
+      " tahmini</strong><br>Transkripsiyon: $" +
+      speechCost.toFixed(3) +
+      "<br>Çeviri: lokal İngilizce $0.000";
   }
 
   function renderPresetPreview() {
@@ -2270,6 +2276,55 @@
 
     var sample = getPreviewText();
     els.captionPreviewCard.style.display = "grid";
+    els.previewStage.style.cssText = previewBackgroundStyle(preset);
+
+    if (state.activeStyleTab === "style") {
+      var words = (sample || "Hi, I'm Hannah.").split(/\s+/);
+      var mid = Math.ceil(words.length / 2);
+      var line1 = words.slice(0, mid).join(" ");
+      var line2 = words.slice(mid).join(" ");
+      var scale = 0.52;
+      var fontSize = Math.max(10, Math.round(Number(preset.fontSize || 56) * scale));
+      var primaryColor = preset.primaryColor || "#ffffff";
+      var accentColor = preset.accentColor || preset.primaryColor || "#fff200";
+      var strokeColor = preset.strokeColor || "#000000";
+      var strokePx = Math.round(Number(preset.strokeWidth || 0) * scale);
+      var shadows = [];
+      if (strokePx > 0) {
+        var s = strokePx;
+        var dirs = [[-s,0],[s,0],[0,-s],[0,s],[-s,-s],[s,-s],[-s,s],[s,s]];
+        for (var d = 0; d < dirs.length; d += 1) {
+          shadows.push(dirs[d][0] + "px " + dirs[d][1] + "px 0 " + strokeColor);
+        }
+      }
+      if (preset.shadowEnabled !== false && !preset.boxEnabled) {
+        shadows.push("0 3px 8px rgba(0,0,0,0.7)");
+      }
+      var boxCss = preset.boxEnabled
+        ? "background:" + (preset.boxColor || primaryColor) + ";border-radius:6px;padding:3px 8px;box-decoration-break:clone;-webkit-box-decoration-break:clone;"
+        : "";
+      var lineCss = "font-family:" + (preset.fontFamily || "Inter") + ";font-size:" + fontSize + "px;font-weight:900;line-height:1.15;color:" + primaryColor + ";text-shadow:" + (shadows.join(",") || "none") + ";display:block;text-align:center;" + boxCss;
+      var accentWord = words[1] || words[0] || "";
+      var makeAccent = function(text) {
+        if (!accentWord) { return text; }
+        return text.split(accentWord).join('<span style="color:' + accentColor + (preset.boxEnabled ? ";background:transparent" : "") + '">' + accentWord + "</span>");
+      };
+      els.previewPrimary.innerHTML = "";
+      els.previewPrimary.style.cssText = "display:block;width:100%;text-align:center;padding:12px 10px;";
+      var div1 = document.createElement("div");
+      div1.style.cssText = lineCss;
+      div1.innerHTML = makeAccent(line1);
+      els.previewPrimary.appendChild(div1);
+      if (line2) {
+        var div2 = document.createElement("div");
+        div2.style.cssText = lineCss;
+        div2.innerHTML = makeAccent(line2);
+        els.previewPrimary.appendChild(div2);
+      }
+      els.previewSecondary.style.display = "none";
+      return;
+    }
+
     els.previewPrimary.innerHTML =
       '<img class="live-preview-image" src="' +
       escapeHtml(
@@ -2284,11 +2339,28 @@
       '" alt="Altyazı önizlemesi">';
     els.previewPrimary.style.cssText = "display:block;width:100%;max-width:100%;";
     els.previewSecondary.style.display = "none";
-    els.previewStage.style.cssText = previewBackgroundStyle(preset);
+  }
+
+  function syncPositionMap() {
+    if (!els.positionMap) { return; }
+    var currentY = Number(state.preset.positionY || 76);
+    var btns = els.positionMap.querySelectorAll(".pos-btn");
+    var closest = null;
+    var minDist = Infinity;
+    btns.forEach(function (btn) {
+      var d = Math.abs(Number(btn.getAttribute("data-pos-y")) - currentY);
+      if (d < minDist) { minDist = d; closest = btn; }
+    });
+    btns.forEach(function (btn) { btn.classList.remove("active"); });
+    if (closest) { closest.classList.add("active"); }
   }
 
   function syncPresetControls() {
-    els.fontInput.value = state.preset.fontFamily;
+    if (els.fontInput && els.fontInput.tagName === "SELECT" && state.systemFonts && state.systemFonts.length) {
+      populateFontSelect(state.preset.fontFamily || "Inter");
+    } else {
+      els.fontInput.value = state.preset.fontFamily;
+    }
     els.primaryColorInput.value = state.preset.primaryColor;
     els.accentColorInput.value = state.preset.accentColor;
     if (els.strokeColorInput) {
@@ -2312,6 +2384,7 @@
     if (els.positionYInput) {
       els.positionYInput.value = state.preset.positionY || 76;
     }
+    syncPositionMap();
     if (els.paddingLeftInput) {
       els.paddingLeftInput.value = state.preset.paddingLeft || 40;
     }
@@ -2737,13 +2810,6 @@
 
   function isTranslationActive() {
     return !!findTranslationLanguage(state.translationTarget);
-  }
-
-  function getActiveOverlayLanguageKey() {
-    if (isTranslationActive()) {
-      return "translation:" + state.translationTarget;
-    }
-    return "source:" + (state.scenario.sourceLang || "primary");
   }
 
   function shouldShowTranslationField() {
@@ -3351,6 +3417,14 @@
       return "Render edilmiş altyazı";
     }
     return "Animasyonlu altyazı";
+  }
+
+  function updateCharacterEstimate() {
+    var total = state.captions.reduce(function (sum, caption) {
+      return sum + caption.text.length + (caption.translation || "").length;
+    }, 0);
+    els.charInput.value = total;
+    renderCost();
   }
 
   function renderPreviewTextOptions() {
