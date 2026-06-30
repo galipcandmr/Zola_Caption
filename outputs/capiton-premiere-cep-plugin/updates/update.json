@@ -1,13 +1,13 @@
 {
-  "latest": "1.0.0-beta",
+  "latest": "1.1.1",
   "minSupported": "0.5.30",
   "mandatory": false,
-  "downloadUrl": "https://github.com/galipcandmr/Zola_Caption/releases/download/v1.0.0-beta/Zola-Caption-v1.0.0-beta-update.zip",
+  "downloadUrl": "https://github.com/galipcandmr/Zola_Caption/releases/download/v1.1.1/Zola-Caption-v1.1.1-update.zip",
   "installMode": "engine",
   "notes": [
-    "Altyazi senkronu kokten duzeltildi: kelime zamanlamasi her caption icin kendi zaman penceresinde eslesiyor, sessizlik sonrasi ve cumle sonu kaymalari gitti.",
-    "Guncelleme paketi artik whisper/ffmpeg/model dosyalarini icermiyor; guncellemeler ~500MB'den ~50MB'a indi, cok daha hizli.",
-    "Otomatik guncelleme sirasinda motorun kendini yeniden baslatamama riski giderildi.",
-    "Panel yolu (extension path) bazi Premiere surumlerinde file:// URI olarak donup guncellemenin yanlis klasore yazilmasina yol aciyordu, duzeltildi."
+    "Panel artık dar Premiere panel boyutlarında (420px ve altı) bozulmuyor; butonlar taşmak yerine kısaltılıyor.",
+    "Drawer-actions butonları küçük ekranda dikey sıralanıyor.",
+    "Topbar 640px altında version rozeti gizlenerek alan kazandırılıyor.",
+    "380px altında drawer gizlenip tüm alan altyazı listesine ayrılıyor."
   ]
 }
