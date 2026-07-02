@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Zola Caption</title>
-    <link rel="stylesheet" href="./styles.css?v=1.0.0-beta">
+    <link rel="stylesheet" href="./styles.css?v=1.1.1">
   </head>
   <body>
     <div class="app-shell">
@@ -12,7 +12,7 @@
         <div class="brand">
           <img src="./assets/brand/zolalogo.png" alt="Zoladijital" class="brand-logo">
           <div class="brand-copy">
-            <span>v1.0.0-beta</span>
+            <span>v1.1.1</span>
           </div>
         </div>
 
@@ -68,19 +68,38 @@
           <div class="setup-actions">
             <div>
               <span id="audioStatus">Sekanstaki ses kanalları otomatik okunuyor.</span>
+              <span class="subtle" id="setupCost">Lokal Whisper ile transkripsiyon maliyeti $0.</span>
             </div>
             <button class="primary" id="transcribeTimelineBtn">Altyazı üret</button>
           </div>
         </section>
 
         <section class="engine-card">
-          <div class="section-title">Çıkış</div>
+          <div class="section-title">Motor</div>
+          <label class="field-label" for="speechProvider">Transkripsiyon</label>
+          <select id="speechProvider">
+            <option value="local-whisper">Lokal Whisper</option>
+            <option value="openai-whisper">OpenAI Whisper / gerçek zamanlı</option>
+            <option value="premiere-native">Premiere yerel transkript</option>
+            <option value="manual-srt">Hazır SRT/VTT</option>
+          </select>
           <label class="field-label" for="outputModeInput">Zaman çizelgesine gönderme şekli</label>
           <select id="outputModeInput">
             <option value="mogrt">Animasyonlu altyazı</option>
             <option value="overlay">Render edilmiş altyazı</option>
             <option value="srt">Premiere altyazısı</option>
           </select>
+          <div class="cost-grid">
+            <label>
+              <span>Dakika</span>
+              <input id="durationInput" type="number" min="1" value="30">
+            </label>
+            <label>
+              <span>Karakter</span>
+              <input id="charInput" type="number" min="0" value="18000">
+            </label>
+          </div>
+          <div class="cost-card" id="costCard"></div>
         </section>
       </main>
 
@@ -127,6 +146,7 @@
             <button class="style-tab" type="button" data-style-tab="general">Genel</button>
             <button class="style-tab" type="button" data-style-tab="caption">Altyazı</button>
             <button class="style-tab" type="button" data-style-tab="style">Stil</button>
+            <button class="style-tab" type="button" data-style-tab="animation">Animasyon</button>
           </div>
 
           <section class="style-panel-content active" data-style-panel="preset">
@@ -146,18 +166,16 @@
           </section>
 
           <section class="style-panel-content" data-style-panel="general">
-            <label class="field-label">
-              Önizleme metni
-              <select id="previewTextSelect"></select>
-            </label>
             <button class="ghost full" id="previewCurrentFrameBtn" type="button">Geçerli karede önizle</button>
             <label class="toggle-row">
               <span>Kısa video güvenli alanı</span>
               <input id="screenGuideInput" type="checkbox">
             </label>
             <div class="position-editor">
-              <div class="position-map">
-                <span></span><strong></strong><span></span>
+              <div class="position-map" id="positionMap">
+                <button class="pos-btn" data-pos-y="12" title="Üst (safe zone)"></button>
+                <button class="pos-btn" data-pos-y="50" title="Orta"></button>
+                <button class="pos-btn" data-pos-y="76" title="Alt (safe zone)"></button>
               </div>
               <label>X <input id="positionXInput" type="number" value="0"></label>
               <label>Y <input id="positionYInput" type="number" value="76"></label>
@@ -206,8 +224,15 @@
 
           <section class="style-panel-content" data-style-panel="style">
             <label class="field-label">
+              Önizleme metni
+              <select id="previewTextSelect"></select>
+            </label>
+            <label class="field-label">
               Yazı tipi
-              <input id="fontInput" type="text" value="Inter">
+              <select id="fontInput">
+                <option value="Inter">Fontlar yükleniyor…</option>
+              </select>
+              <span id="fontWarning" class="field-warning hidden-field"></span>
             </label>
             <div class="split-fields">
               <label>Yazı boyutu <input id="fontSizeInput" type="number" min="24" max="160" step="1" value="56"></label>
@@ -240,6 +265,7 @@
               <input id="styleOverrideInput" type="checkbox">
               <span>Stili MOGRT'e uygula</span>
             </label>
+
           </section>
 
           <section class="style-panel-content" data-style-panel="animation">
@@ -295,7 +321,7 @@
           <div class="settings-grid">
             <div class="settings-row">
               <span>Sürüm</span>
-              <strong id="settingsVersion">v1.0.0-beta</strong>
+              <strong id="settingsVersion">v1.1.1</strong>
               <small id="settingsVersionStatus">Yerel önizleme güncel.</small>
             </div>
             <div class="settings-row" id="settingsUpdateRow">
@@ -303,7 +329,6 @@
               <strong id="settingsUpdateStatus">Kontrol ediliyor</strong>
               <small id="settingsUpdateDetails">GitHub güncelleme bilgisi okunuyor.</small>
               <button class="primary settings-row-action" id="settingsInstallUpdateBtn" type="button" hidden>Güncellemeyi yükle</button>
-              <small id="settingsUpdateProgress" class="settings-row-feedback" hidden></small>
             </div>
             <div class="settings-row">
               <span>Yerel motor</span>
@@ -314,11 +339,6 @@
               <span>Google Translate</span>
               <strong id="settingsGoogleStatus">Kontrol ediliyor</strong>
               <small id="settingsGoogleDetails">API anahtarı durumu okunuyor.</small>
-              <div class="settings-row-field">
-                <input type="password" id="settingsGoogleApiKeyInput" placeholder="Google Translate API anahtarı" autocomplete="off" spellcheck="false">
-                <button class="primary settings-row-action" id="settingsGoogleApiKeySaveBtn" type="button">Kaydet</button>
-              </div>
-              <small id="settingsGoogleSaveStatus" class="settings-row-feedback" hidden></small>
             </div>
             <div class="settings-row">
               <span>Çeviri kullanımı</span>
@@ -341,7 +361,6 @@
           <h2>Yeni güncelleme var</h2>
           <p id="updateModalSummary">Yeni sürüm hazır.</p>
           <ul id="updateNotesList"></ul>
-          <small id="updateModalProgress" class="settings-row-feedback" hidden></small>
           <div class="modal-actions">
             <button class="ghost" id="deferUpdateBtn" type="button">Daha sonra</button>
             <button class="primary" id="installUpdateBtn" type="button">Güncelle</button>
@@ -361,7 +380,7 @@
       <option value="Landscape">16:9 Yatay</option>
     </select>
     <select id="mogrtStyleInput" class="hidden-field" aria-hidden="true"></select>
-    <script src="./src/update-config.js?v=1.0.0-beta"></script>
-    <script src="./src/cep-app.js?v=1.0.0-beta"></script>
+    <script src="./src/update-config.js?v=1.1.1"></script>
+    <script src="./src/cep-app.js?v=1.1.1"></script>
   </body>
 </html>
