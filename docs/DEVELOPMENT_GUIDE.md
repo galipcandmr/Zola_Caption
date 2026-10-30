@@ -11,6 +11,7 @@ Bu rehber lokal gelistirme, Premiere test, paketleme ve temel kontrolleri anlati
 - GitHub CLI opsiyonel; release upload icin kullanisli.
 
 Bu projede dis paket yoneticisi zorunlu degil. Panel vanilla JS/CSS/HTML ile yazildi.
+Node'un yerlesik test kosucusu kullanilir; testler icin ek paket kurulumu gerekmez.
 
 ## Tarayicida UI Onizleme
 
@@ -57,7 +58,7 @@ Beklenen:
 Hazir release paketi varsa:
 
 ```bash
-bash "dist/Zola-Caption-v0.5.35/Zola Caption Installer.command"
+bash "dist/Zola-Caption-v1.1.1/Zola Caption Installer.command"
 ```
 
 Manuel kurulum hedefleri:
@@ -112,6 +113,7 @@ Repo icindeki `outputs/capiton-local-engine/.env` sadece lokal gelistirme icindi
 Syntax kontrol:
 
 ```bash
+npm run check
 bash -n scripts/install-macos.sh
 bash -n scripts/build-macos-dmg.sh
 bash -n scripts/package-release.sh
@@ -122,13 +124,13 @@ node -c outputs/capiton-premiere-cep-plugin/src/cep-app.js
 Release zip:
 
 ```bash
-scripts/package-release.sh 0.5.35
+scripts/package-release.sh 1.1.1
 ```
 
 DMG:
 
 ```bash
-scripts/build-macos-dmg.sh 0.5.35
+scripts/build-macos-dmg.sh 1.1.1
 ```
 
 Git durum:
@@ -146,12 +148,13 @@ git log --oneline -5
 4. Hazirla ekraninda ses kanali dogru gorunuyor mu kontrol et.
 5. Konusma dili `Dili otomatik sec` veya manuel sec.
 6. `Altyazi uret`.
-7. Altyaziyi duzenle ekraninda bir kelimeyi degistir.
-8. Gerekirse ceviri hedefini sec.
-9. Stil sec.
-10. `Yeniden uret ve bas`.
-11. Overlay timeline'da kaynak sesle ayni baslangicta mi kontrol et.
-12. Kelime vurgusu okunan kelimeyle eslesiyor mu kontrol et.
+7. Secili ses kanalinda birden fazla kesilmis klip varsa log'daki `Islenen ses klibi` sayisinin tamamini kapsadigini kontrol et.
+8. Altyaziyi duzenle ekraninda bir kelimeyi degistir.
+9. Gerekirse ceviri hedefini sec.
+10. Stil sec.
+11. `Yeniden uret ve bas`.
+12. Overlay timeline'da kaynak sesle ayni baslangicta mi kontrol et.
+13. Kelime vurgusu okunan kelimeyle eslesiyor mu kontrol et.
 
 ## Kod Degistirme Kurallari
 
@@ -164,4 +167,3 @@ git log --oneline -5
   - `com.zoladijital.capiton.engine`
 - UI adi `Zola Caption` olarak kalmali.
 - Update JSON ile panel `CURRENT_VERSION` uyumlu olmali.
-

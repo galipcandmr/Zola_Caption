@@ -4,7 +4,7 @@ Bu dokuman beta release hazirlama, GitHub'a yukleme ve otomatik guncelleme manti
 
 ## Surum Numarasi
 
-Surumler `0.5.35` gibi tutulur. Panel icinde `v0.5.35` olarak gorunur.
+Surumler `1.1.1` gibi tutulur. Panel icinde `v1.1.1` olarak gorunur.
 
 Degistirilmesi gereken yerler:
 
@@ -24,28 +24,30 @@ Degistirilmesi gereken yerler:
 
 ## Paket Olusturma
 
-Zip:
+Tam kurulum zip'i ve otomatik guncelleme zip'i:
 
 ```bash
-scripts/package-release.sh 0.5.35
+scripts/package-release.sh 1.1.1
+scripts/package-release.sh 1.1.1 --slim
 ```
 
 Cikti:
 
 ```text
-dist/Zola-Caption-v0.5.35.zip
+dist/Zola-Caption-v1.1.1.zip
+dist/Zola-Caption-v1.1.1-update.zip
 ```
 
 DMG:
 
 ```bash
-scripts/build-macos-dmg.sh 0.5.35
+scripts/build-macos-dmg.sh 1.1.1
 ```
 
 Cikti:
 
 ```text
-dist/Zola-Caption-v0.5.35.dmg
+dist/Zola-Caption-v1.1.1.dmg
 ```
 
 ## GitHub Release Yukleme
@@ -53,18 +55,19 @@ dist/Zola-Caption-v0.5.35.dmg
 Ornek:
 
 ```bash
-gh release create v0.5.35 \
-  dist/Zola-Caption-v0.5.35.zip \
-  dist/Zola-Caption-v0.5.35.dmg \
+gh release create v1.1.1 \
+  dist/Zola-Caption-v1.1.1.zip \
+  dist/Zola-Caption-v1.1.1-update.zip \
+  dist/Zola-Caption-v1.1.1.dmg \
   --repo galipcandmr/Zola_Caption \
-  --title "Zola Caption v0.5.35" \
+  --title "Zola Caption v1.1.1" \
   --notes "Release notlari"
 ```
 
 Var olan release'e asset yuklemek:
 
 ```bash
-gh release upload v0.5.35 dist/Zola-Caption-v0.5.35.zip dist/Zola-Caption-v0.5.35.dmg --clobber --repo galipcandmr/Zola_Caption
+gh release upload v1.1.1 dist/Zola-Caption-v1.1.1.zip dist/Zola-Caption-v1.1.1-update.zip dist/Zola-Caption-v1.1.1.dmg --clobber --repo galipcandmr/Zola_Caption
 ```
 
 ## Update JSON
@@ -79,10 +82,10 @@ Ornek:
 
 ```json
 {
-  "latest": "0.5.35",
+  "latest": "1.1.1",
   "minSupported": "0.5.30",
   "mandatory": false,
-  "downloadUrl": "https://github.com/galipcandmr/Zola_Caption/releases/download/v0.5.35/Zola-Caption-v0.5.35.zip",
+  "downloadUrl": "https://github.com/galipcandmr/Zola_Caption/releases/download/v1.1.1/Zola-Caption-v1.1.1-update.zip",
   "installMode": "engine",
   "notes": [
     "Tek tik otomatik guncelleme akisi eklendi."
@@ -95,7 +98,7 @@ Alanlar:
 - `latest`: En yeni surum.
 - `minSupported`: Bundan eski surumler zorunlu update sayilir.
 - `mandatory`: `true` ise Daha sonra butonu kapatilir.
-- `downloadUrl`: Zip release asset URL'i.
+- `downloadUrl`: Binary/model icermeyen `-update.zip` release asset URL'i.
 - `installMode`: Su an `engine`.
 - `notes`: Modal'da gorunen release notlari.
 
@@ -139,4 +142,3 @@ Kod devri icin `dist/Zola-Caption-Handoff-YYYYMMDD-HHMM.zip` olusturulur. Bu pak
 - release assetlerini
 
 icerir; `.env`, `work/`, `.git`, runtime cache ve gecici dosyalari icermez.
-

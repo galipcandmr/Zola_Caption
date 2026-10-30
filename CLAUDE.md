@@ -36,7 +36,7 @@ Bu kisimlar kelime kelime vurgu, ekranda kac kelime gorunecegi, timeline baslang
 
 ## Guncel Uretim Surumu
 
-Bu handoff hazirlandiginda ana surum `v0.5.35`.
+Bu handoff hazirlandiginda ana surum `v1.1.1`.
 
 GitHub:
 
@@ -60,7 +60,7 @@ http://127.0.0.1:18183/index.html?mock=1
 Premiere icinde calismasi icin CEP klasorune kurulmasi gerekir:
 
 ```bash
-bash "dist/Zola-Caption-v0.5.35/Zola Caption Installer.command"
+bash "dist/Zola-Caption-v1.1.1/Zola Caption Installer.command"
 ```
 
 ## Secrets

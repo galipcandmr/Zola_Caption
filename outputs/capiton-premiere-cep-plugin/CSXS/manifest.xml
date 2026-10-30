@@ -2,11 +2,11 @@
 <ExtensionManifest
   Version="7.0"
   ExtensionBundleId="com.zoladijital.capiton"
-  ExtensionBundleVersion="1.1.1"
+  ExtensionBundleVersion="1.1.8"
   ExtensionBundleName="Zola Caption"
   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <ExtensionList>
-    <Extension Id="com.zoladijital.capiton.panel" Version="1.1.1"/>
+    <Extension Id="com.zoladijital.capiton.panel" Version="1.1.8"/>
   </ExtensionList>
   <ExecutionEnvironment>
     <HostList>
@@ -28,6 +28,8 @@
           <CEFCommandLine>
             <Parameter>--allow-file-access</Parameter>
             <Parameter>--allow-file-access-from-files</Parameter>
+            <Parameter>--enable-nodejs</Parameter>
+            <Parameter>--mixed-context</Parameter>
           </CEFCommandLine>
         </Resources>
         <Lifecycle>

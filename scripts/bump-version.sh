@@ -25,15 +25,26 @@ echo "Surum guncelleniyor: $OLD_VERSION -> $NEW_VERSION"
 
 replace_in_file() {
   local file="$1"
-  sed -i '' "s/$OLD_VERSION/$NEW_VERSION/g" "$file"
+  python3 - "$file" "$OLD_VERSION" "$NEW_VERSION" <<'PYEOF'
+from pathlib import Path
+import sys
+
+file_path, old_version, new_version = sys.argv[1:4]
+path = Path(file_path)
+content = path.read_text(encoding="utf-8")
+if old_version not in content:
+    raise SystemExit(f"Eski surum dosyada bulunamadi: {file_path}")
+path.write_text(content.replace(old_version, new_version), encoding="utf-8")
+PYEOF
   echo "  guncellendi: $file"
 }
 
 replace_in_file "$ROOT/outputs/capiton-premiere-cep-plugin/CSXS/manifest.xml"
 replace_in_file "$ROOT/outputs/capiton-premiere-cep-plugin/index.html"
 replace_in_file "$ROOT/outputs/capiton-premiere-cep-plugin/src/cep-app.js"
+replace_in_file "$ROOT/package.json"
 
-DOWNLOAD_URL="https://github.com/galipcandmr/Zola_Caption/releases/download/v$NEW_VERSION/Zola-Caption-v$NEW_VERSION.zip"
+DOWNLOAD_URL="https://github.com/galipcandmr/Zola_Caption/releases/download/v$NEW_VERSION/Zola-Caption-v$NEW_VERSION-update.zip"
 UPDATE_JSON="$ROOT/outputs/capiton-premiere-cep-plugin/updates/update.json"
 
 # minSupported kasitli olarak degistirilmiyor: hangi eski surumlerin "zorunlu guncelleme"

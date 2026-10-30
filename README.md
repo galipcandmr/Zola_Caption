@@ -28,7 +28,7 @@ Projeyi devralacak kisi su sirayla okumali:
 
 1. GitHub'da `galipcandmr/Zola_Caption` reposunu ac.
 2. Bu klasoru git repo yap ve remote olarak GitHub reposuna bagla.
-3. Her beta surumde `scripts/package-release.sh 0.5.35` ile paket olustur.
+3. Her beta surumde `scripts/package-release.sh 1.1.1` ile paket olustur.
 4. Zip dosyasini GitHub Releases altina yukle.
 5. `outputs/capiton-premiere-cep-plugin/updates/update.json` dosyasindaki bilgileri yeni release'e gore guncelle.
 6. Panel acilista update JSON'u kontrol eder.
@@ -40,10 +40,10 @@ Panel su semayi okur:
 
 ```json
 {
-  "latest": "0.5.35",
+  "latest": "1.1.1",
   "minSupported": "0.5.30",
   "mandatory": false,
-  "downloadUrl": "https://github.com/galipcandmr/Zola_Caption/releases/download/v0.5.35/Zola-Caption-v0.5.35.zip",
+  "downloadUrl": "https://github.com/galipcandmr/Zola_Caption/releases/download/v1.1.1/Zola-Caption-v1.1.1-update.zip",
   "installMode": "engine",
   "notes": [
     "Tek tik otomatik guncelleme akisi eklendi."
@@ -66,25 +66,25 @@ Repo ve release paketleri `.env` dosyasini icermemeli. Google API anahtari kulla
 
 ```bash
 chmod +x scripts/package-release.sh
-scripts/package-release.sh 0.5.35
+scripts/package-release.sh 1.1.1
 ```
 
 Cikti:
 
 ```text
-dist/Zola-Caption-v0.5.35.zip
+dist/Zola-Caption-v1.1.1.zip
 ```
 
 ## macOS DMG Olusturma
 
 ```bash
-scripts/build-macos-dmg.sh 0.5.35
+scripts/build-macos-dmg.sh 1.1.1
 ```
 
 Cikti:
 
 ```text
-dist/Zola-Caption-v0.5.35.dmg
+dist/Zola-Caption-v1.1.1.dmg
 ```
 
 DMG icindeki `Zola Caption Installer.command` beta tester bilgisayarinda sunlari otomatik yapar:

@@ -7,7 +7,7 @@ set -euo pipefail
 # Adimlar:
 #   1. scripts/bump-version.sh ile surum numarasini her yerde guncelle
 #   2. git commit (henuz push YOK)
-#   3. package-release.sh ile zip uret
+#   3. package-release.sh ile tam kurulum ve slim update zip'lerini uret
 #   4. build-macos-dmg.sh ile dmg uret
 #
 # Bu script BURADA DURUR ve push/release adimlarini ELLE onaylamani bekler.
@@ -62,9 +62,11 @@ git commit -m "Release v$VERSION" >/dev/null
 echo "  commit olustu: $(git log -1 --oneline)"
 
 echo ""
-echo "== 3/4: Zip paketi uretiliyor =="
+echo "== 3/4: Zip paketleri uretiliyor =="
 ZIP_PATH="$("$ROOT/scripts/package-release.sh" "$VERSION")"
-echo "  zip: $ZIP_PATH"
+UPDATE_ZIP_PATH="$("$ROOT/scripts/package-release.sh" "$VERSION" --slim)"
+echo "  tam kurulum zip: $ZIP_PATH"
+echo "  otomatik guncelleme zip: $UPDATE_ZIP_PATH"
 
 echo ""
 echo "== 4/4: DMG paketi uretiliyor =="
@@ -97,6 +99,6 @@ echo "Devam etmek icin (kontrol edip) su komutlari SIRAYLA calistir:"
 echo ""
 echo "  git tag v$VERSION"
 echo "  git push origin main --tags"
-printf '  %s release create v%s "%s" "%s" --title "v%s" --notes "%s"\n' \
-  "$GH_CMD" "$VERSION" "$ZIP_PATH" "$DMG_PATH" "$VERSION" "$RELEASE_NOTES"
+printf '  %s release create v%s "%s" "%s" "%s" --title "v%s" --notes "%s"\n' \
+  "$GH_CMD" "$VERSION" "$ZIP_PATH" "$UPDATE_ZIP_PATH" "$DMG_PATH" "$VERSION" "$RELEASE_NOTES"
 echo "================================================================"

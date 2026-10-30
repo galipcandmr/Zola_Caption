@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  var CURRENT_VERSION = "v1.1.1";
+  var CURRENT_VERSION = "v1.1.8";
 
   var scenarios = [
     {
@@ -378,6 +378,8 @@
     latestTimelineStartSeconds: 0,
     latestTimelineEndSeconds: 0,
     latestClipDurationSeconds: 0,
+    sequenceWidth: 1080,
+    sequenceHeight: 1920,
     latestWords: [],
     updateInfo: null,
     updateDismissedVersion: ""
@@ -442,6 +444,7 @@
     els.captionMeta = document.querySelector("#captionMeta");
     els.sequenceTitle = document.querySelector("#sequenceTitle");
     els.costCard = document.querySelector("#costCard");
+    els.outputPane = document.querySelector(".output-pane");
     els.logOutput = document.querySelector("#logOutput");
     els.analyzingLabel = document.querySelector("#analyzingLabel");
     els.fileInput = document.querySelector("#fileInput");
@@ -451,10 +454,25 @@
     els.charInput = document.querySelector("#charInput");
     els.previewPrimary = document.querySelector("#previewPrimary");
     els.previewSecondary = document.querySelector("#previewSecondary");
+    els.previewWatermark = document.querySelector("#previewWatermark");
     els.captionPreviewCard = document.querySelector("#captionPreviewCard");
     els.previewVideo = document.querySelector("#previewVideo");
     els.previewStage = document.querySelector("#previewStage");
     els.fontInput = document.querySelector("#fontInput");
+    els.fontPicker = document.querySelector("#fontPicker");
+    els.fontPickerTrigger = document.querySelector("#fontPickerTrigger");
+    els.fontPickerValue = document.querySelector("#fontPickerValue");
+    els.fontPickerPopover = document.querySelector("#fontPickerPopover");
+    els.fontSearchInput = document.querySelector("#fontSearchInput");
+    els.fontOptionList = document.querySelector("#fontOptionList");
+    els.fontPickerEmpty = document.querySelector("#fontPickerEmpty");
+    els.fontMeta = document.querySelector("#fontMeta");
+    els.fontWeightInput = document.querySelector("#fontWeightInput");
+    els.italicEnabledInput = document.querySelector("#italicEnabledInput");
+    els.underlineEnabledInput = document.querySelector("#underlineEnabledInput");
+    els.watermarkSettingsRow = document.querySelector("#watermarkSettingsRow");
+    els.watermarkEnabledInput = document.querySelector("#watermarkEnabledInput");
+    els.letterSpacingInput = document.querySelector("#letterSpacingInput");
     els.primaryColorInput = document.querySelector("#primaryColorInput");
     els.accentColorInput = document.querySelector("#accentColorInput");
     els.strokeColorInput = document.querySelector("#strokeColorInput");
@@ -462,7 +480,15 @@
     els.fontSizeInput = document.querySelector("#fontSizeInput");
     els.animationInput = document.querySelector("#animationInput");
     els.boxEnabledInput = document.querySelector("#boxEnabledInput");
+    els.boxColorInput = document.querySelector("#boxColorInput");
+    els.boxOpacityInput = document.querySelector("#boxOpacityInput");
+    els.boxPaddingInput = document.querySelector("#boxPaddingInput");
     els.shadowEnabledInput = document.querySelector("#shadowEnabledInput");
+    els.shadowColorInput = document.querySelector("#shadowColorInput");
+    els.shadowOpacityInput = document.querySelector("#shadowOpacityInput");
+    els.shadowDistanceInput = document.querySelector("#shadowDistanceInput");
+    els.shadowBlurInput = document.querySelector("#shadowBlurInput");
+    els.shadowDirectionInput = document.querySelector("#shadowDirectionInput");
     els.positionXInput = document.querySelector("#positionXInput");
     els.positionYInput = document.querySelector("#positionYInput");
     els.positionMap = document.querySelector("#positionMap");
@@ -689,6 +715,11 @@
     });
     [
       els.fontInput,
+      els.fontWeightInput,
+      els.italicEnabledInput,
+      els.underlineEnabledInput,
+      els.watermarkEnabledInput,
+      els.letterSpacingInput,
       els.primaryColorInput,
       els.accentColorInput,
       els.strokeColorInput,
@@ -696,7 +727,15 @@
       els.fontSizeInput,
       els.animationInput,
       els.boxEnabledInput,
+      els.boxColorInput,
+      els.boxOpacityInput,
+      els.boxPaddingInput,
       els.shadowEnabledInput,
+      els.shadowColorInput,
+      els.shadowOpacityInput,
+      els.shadowDistanceInput,
+      els.shadowBlurInput,
+      els.shadowDirectionInput,
       els.positionXInput,
       els.positionYInput,
       els.paddingLeftInput,
@@ -726,12 +765,7 @@
       });
     }
 
-    if (els.fontInput) {
-      els.fontInput.addEventListener("change", function () {
-        checkFontAvailability();
-        renderPresetPreview();
-      });
-    }
+    bindFontPickerEvents();
 
   }
 
@@ -1308,6 +1342,11 @@
     return String((preset && (preset.displayName || preset.name)) || "Stil").trim();
   }
 
+  function isEsrarengizWatermarkPreset(preset) {
+    var name = String((preset && preset.name) || "").toLocaleLowerCase("tr-TR").replace(/\s+/g, "");
+    return name === "esrarengizbiolay";
+  }
+
   function renderMogrtOptions() {
     els.outputModeInput.value = state.outputMode;
     if (els.mogrtRatioInput) {
@@ -1617,16 +1656,18 @@
       }
 
       writeLog(sourceResult.message + "\nZola Caption yerel motora gönderiliyor...");
-      callEngine("/transcribe", {
+      var transcriptionPayload = {
         mediaPath: sourceResult.mediaPath,
-        language: state.detectedLanguage ? state.detectedLanguage.code : els.languageMode.value || "auto",
+        clips: sourceResult.clips || [],
+        language: resolveTranscriptionLanguage(),
         task: isTranslate ? "translate" : "transcribe",
         outputLanguage: outputLanguage || (isTranslate ? "en" : "source"),
         trackId: track.id,
         scenario: state.scenario.id,
         trimStartSeconds: sourceResult.sourceInSeconds || 0,
         trimEndSeconds: sourceResult.sourceOutSeconds || 0
-      }, function (engineResult) {
+      };
+      callTranscriptionEngine(transcriptionPayload, sourceResult, function (engineResult) {
         if (!engineResult.ok) {
           setAppMode(state.captions.length ? "edit" : "setup");
           writeLog(engineResult.message);
@@ -1671,6 +1712,8 @@
             formatShortTime(state.latestTimelineStartSeconds) +
             "\nMod: " +
             (engineResult.task === "translate" ? "İngilizce çeviri" : "Orijinal dil transkripsiyon") +
+            "\nİşlenen ses klibi: " +
+            Number(engineResult.sourceClipCount || 1) +
             "\nSRT: " +
             (engineResult.files && engineResult.files.srtPath ? engineResult.files.srtPath : "-")
         );
@@ -1803,6 +1846,189 @@
     xhr.send(JSON.stringify(payload));
   }
 
+  function callTranscriptionEngine(payload, sourceResult, callback) {
+    callEngine("/transcribe", payload, function (result) {
+      if (!isEngineMediaPermissionFailure(result)) {
+        callback(result);
+        return;
+      }
+
+      writeLog("macOS dosya izni arka plan motorunu engelledi. Ses Premiere'ın yetkisiyle güvenli çalışma klasörüne hazırlanıyor...");
+      stageAudioThroughPremiere(sourceResult, function (stageResult) {
+        if (!stageResult.ok) {
+          callback({
+            ok: false,
+            code: stageResult.code || result.code,
+            message: stageResult.message || result.message
+          });
+          return;
+        }
+
+        var retryPayload = copy(payload);
+        retryPayload.mediaPath = stageResult.clips[0].mediaPath;
+        retryPayload.trimStartSeconds = 0;
+        retryPayload.trimEndSeconds = stageResult.singleDuration || 0;
+        retryPayload.clips = stageResult.isMultiClip ? stageResult.clips : [];
+        callEngine("/transcribe", retryPayload, callback);
+      });
+    });
+  }
+
+  function isEngineMediaPermissionFailure(result) {
+    if (!result || result.ok) {
+      return false;
+    }
+    var code = String(result.code || "");
+    var message = String(result.message || "").toLowerCase();
+    return code === "MEDIA_NOT_READABLE" || /okuma izni yok|permission denied|operation not permitted/.test(message);
+  }
+
+  function getCepNodeRequire() {
+    try {
+      if (window && typeof window.require === "function") {
+        return window.require;
+      }
+    } catch (windowError) {}
+    try {
+      if (typeof require === "function") {
+        return require;
+      }
+    } catch (requireError) {}
+    return null;
+  }
+
+  function stageAudioThroughPremiere(sourceResult, callback) {
+    var nodeRequire = getCepNodeRequire();
+    if (!nodeRequire) {
+      callback({
+        ok: false,
+        code: "PREMIERE_AUDIO_BRIDGE_UNAVAILABLE",
+        message: "Premiere ses köprüsü etkin değil. Premiere Pro'yu tamamen kapatıp yeniden aç, sonra tekrar dene."
+      });
+      return;
+    }
+
+    callEngineHealth(function (health) {
+      if (!health.ok || !health.ffmpeg || !health.workDir) {
+        callback({ ok: false, code: "ENGINE_PATHS_MISSING", message: "Yerel motorun FFmpeg veya çalışma klasörü okunamadı." });
+        return;
+      }
+
+      var childProcess;
+      var fileSystem;
+      var pathModule;
+      try {
+        childProcess = nodeRequire("child_process");
+        fileSystem = nodeRequire("fs");
+        pathModule = nodeRequire("path");
+      } catch (error) {
+        callback({ ok: false, code: "PREMIERE_NODE_MODULE_ERROR", message: "Premiere ses köprüsü başlatılamadı: " + error.message });
+        return;
+      }
+
+      var originalClips = sourceResult.clips && sourceResult.clips.length
+        ? sourceResult.clips
+        : [{
+            clipIndex: 0,
+            clipName: sourceResult.clipName || "Premiere sesi",
+            mediaPath: sourceResult.mediaPath,
+            timelineStartSeconds: Number(sourceResult.timelineStartSeconds || 0),
+            timelineEndSeconds: Number(sourceResult.timelineEndSeconds || 0),
+            sourceInSeconds: Number(sourceResult.sourceInSeconds || 0),
+            sourceOutSeconds: Number(sourceResult.sourceOutSeconds || 0)
+          }];
+      var staged = [];
+      var jobId = String(Date.now()) + "-" + String(Math.round(Math.random() * 1000000));
+
+      function runNext(index) {
+        if (index >= originalClips.length) {
+          var singleDuration = staged.length === 1 ? staged[0].sourceOutSeconds : 0;
+          callback({ ok: true, clips: staged, isMultiClip: originalClips.length > 1, singleDuration: singleDuration });
+          return;
+        }
+
+        var clip = originalClips[index] || {};
+        var sourceIn = Math.max(0, Number(clip.sourceInSeconds || 0));
+        var timelineDuration = Math.max(0.2, Number(clip.timelineEndSeconds || 0) - Number(clip.timelineStartSeconds || 0));
+        var sourceDuration = Number(clip.sourceOutSeconds || 0) - sourceIn;
+        var duration = Math.max(0.2, sourceDuration > 0 ? sourceDuration : timelineDuration);
+        var outputPath = pathModule.join(health.workDir, "premiere-audio-" + jobId + "-" + index + ".wav");
+
+        extractClip(false, function (firstResult) {
+          if (firstResult.ok) {
+            finishClip();
+            return;
+          }
+          extractClip(true, function (fallbackResult) {
+            if (!fallbackResult.ok) {
+              callback({
+                ok: false,
+                code: "PREMIERE_AUDIO_EXTRACTION_FAILED",
+                message: "Premiere dosyaya erişebildi ancak ses çıkarılamadı: " + (fallbackResult.detail || firstResult.detail || "Bilinmeyen FFmpeg hatası")
+              });
+              return;
+            }
+            finishClip();
+          });
+        });
+
+        function extractClip(tolerant, done) {
+          var args = ["-y", "-nostdin", "-hide_banner", "-loglevel", tolerant ? "warning" : "error"];
+          if (tolerant) {
+            args.push("-fflags", "+genpts+discardcorrupt", "-err_detect", "ignore_err", "-i", String(clip.mediaPath || ""));
+            if (sourceIn > 0) {
+              args.push("-ss", String(sourceIn));
+            }
+          } else {
+            if (sourceIn > 0) {
+              args.push("-ss", String(sourceIn));
+            }
+            args.push("-i", String(clip.mediaPath || ""));
+          }
+          args.push("-t", String(duration), "-map", "0:a:0", "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", outputPath);
+          var child = childProcess.spawn(health.ffmpeg, args, { stdio: ["ignore", "ignore", "pipe"] });
+          var stderr = "";
+          var settled = false;
+          function settle(result) {
+            if (settled) {
+              return;
+            }
+            settled = true;
+            done(result);
+          }
+          child.stderr.on("data", function (chunk) {
+            stderr += chunk.toString();
+          });
+          child.on("error", function (error) {
+            settle({ ok: false, detail: error.message });
+          });
+          child.on("close", function (code) {
+            var valid = false;
+            try {
+              valid = code === 0 && fileSystem.existsSync(outputPath) && fileSystem.statSync(outputPath).size > 44;
+            } catch (error) {}
+            settle({ ok: valid, detail: stderr.replace(/\s+/g, " ").trim().slice(-1200) });
+          });
+        }
+
+        function finishClip() {
+          staged.push({
+            clipIndex: Number(clip.clipIndex == null ? index : clip.clipIndex),
+            clipName: String(clip.clipName || "Premiere sesi"),
+            mediaPath: outputPath,
+            timelineStartSeconds: Number(clip.timelineStartSeconds || 0),
+            timelineEndSeconds: Number(clip.timelineEndSeconds || 0),
+            sourceInSeconds: 0,
+            sourceOutSeconds: duration
+          });
+          runNext(index + 1);
+        }
+      }
+
+      runNext(0);
+    });
+  }
+
   function callEngineHealth(callback) {
     var xhr = new XMLHttpRequest();
     xhr.open("GET", "http://127.0.0.1:17771/health", true);
@@ -1844,40 +2070,26 @@
   function loadSystemFonts() {
     callEngineSystemFonts(function (result) {
       state.systemFonts = result && result.ok && result.fonts ? result.fonts : [];
+      state.systemFontFaces = result && result.ok && result.faces ? result.faces : [];
       populateFontSelect(state.preset.fontFamily || "Inter");
     });
   }
 
   function populateFontSelect(currentValue) {
-    var select = els.fontInput;
-    if (!select || select.tagName !== "SELECT") {
+    var input = els.fontInput;
+    if (!input) {
       return;
     }
     var fonts = state.systemFonts || [];
-    var fragment = document.createDocumentFragment();
-    var isInstalled = false;
-
-    for (var i = 0; i < fonts.length; i += 1) {
-      if (fonts[i] === currentValue) {
-        isInstalled = true;
-      }
-      var opt = document.createElement("option");
-      opt.value = fonts[i];
-      opt.textContent = fonts[i];
-      fragment.appendChild(opt);
+    input.value = currentValue || "";
+    if (els.fontPickerValue) {
+      els.fontPickerValue.textContent = currentValue || "Yazı tipi seç";
+      els.fontPickerValue.style.fontFamily = fontFamilyCss(currentValue);
     }
-
-    select.innerHTML = "";
-    if (!isInstalled && currentValue) {
-      var missing = document.createElement("option");
-      missing.value = currentValue;
-      missing.textContent = currentValue + " (yüklü değil)";
-      select.appendChild(missing);
-    }
-    select.appendChild(fragment);
-    select.value = currentValue;
+    renderFontOptions("");
 
     var warningEl = document.querySelector("#fontWarning");
+    var isInstalled = isSystemFontInstalled(currentValue);
     if (warningEl) {
       if (!isInstalled && currentValue && fonts.length) {
         warningEl.classList.remove("hidden-field");
@@ -1887,19 +2099,163 @@
         warningEl.textContent = "";
       }
     }
+    if (els.fontMeta) {
+      els.fontMeta.textContent = fonts.length
+        ? fonts.length + " yüklü yazı tipi"
+        : "Yüklü yazı tipleri okunamadı.";
+    }
+  }
+
+  function bindFontPickerEvents() {
+    if (!els.fontPickerTrigger || !els.fontPickerPopover) {
+      return;
+    }
+
+    els.fontPickerTrigger.addEventListener("click", function () {
+      if (els.fontPickerPopover.hidden) {
+        openFontPicker();
+      } else {
+        closeFontPicker();
+      }
+    });
+
+    if (els.fontSearchInput) {
+      els.fontSearchInput.addEventListener("input", function () {
+        renderFontOptions(els.fontSearchInput.value);
+      });
+      els.fontSearchInput.addEventListener("keydown", function (event) {
+        if (event.key === "Escape") {
+          closeFontPicker();
+          els.fontPickerTrigger.focus();
+        }
+      });
+    }
+
+    if (els.fontOptionList) {
+      els.fontOptionList.addEventListener("click", function (event) {
+        var option = event.target.closest(".font-option");
+        if (!option) {
+          return;
+        }
+        selectFont(option.getAttribute("data-font-name") || "");
+      });
+    }
+
+    document.addEventListener("mousedown", function (event) {
+      if (!els.fontPickerPopover.hidden && els.fontPicker && !els.fontPicker.contains(event.target)) {
+        closeFontPicker();
+      }
+    });
+  }
+
+  function openFontPicker() {
+    els.fontPickerPopover.hidden = false;
+    els.fontPickerTrigger.setAttribute("aria-expanded", "true");
+    if (els.fontSearchInput) {
+      els.fontSearchInput.value = "";
+    }
+    renderFontOptions("");
+    window.setTimeout(function () {
+      if (els.fontSearchInput) {
+        els.fontSearchInput.focus();
+      }
+    }, 0);
+  }
+
+  function closeFontPicker() {
+    if (!els.fontPickerPopover) {
+      return;
+    }
+    els.fontPickerPopover.hidden = true;
+    if (els.fontPickerTrigger) {
+      els.fontPickerTrigger.setAttribute("aria-expanded", "false");
+    }
+  }
+
+  function renderFontOptions(queryValue) {
+    if (!els.fontOptionList) {
+      return;
+    }
+    var query = normalizeFontQuery(queryValue);
+    var current = String((els.fontInput && els.fontInput.value) || "");
+    var matching = (state.systemFonts || []).filter(function (font) {
+      return !query || normalizeFontQuery(font).indexOf(query) !== -1;
+    });
+    if (!query && current && matching.indexOf(current) > 0) {
+      matching.splice(matching.indexOf(current), 1);
+      matching.unshift(current);
+    }
+    matching = matching.slice(0, 160);
+    var fragment = document.createDocumentFragment();
+
+    matching.forEach(function (font) {
+      var option = document.createElement("button");
+      option.type = "button";
+      option.className = "font-option" + (font === current ? " active" : "");
+      option.setAttribute("role", "option");
+      option.setAttribute("aria-selected", font === current ? "true" : "false");
+      option.setAttribute("data-font-name", font);
+      option.style.fontFamily = fontFamilyCss(font);
+      option.innerHTML = "<span>" + escapeHtml(font) + "</span><small>Aa</small>";
+      fragment.appendChild(option);
+    });
+
+    els.fontOptionList.innerHTML = "";
+    els.fontOptionList.appendChild(fragment);
+    if (els.fontPickerEmpty) {
+      els.fontPickerEmpty.hidden = matching.length > 0;
+    }
+  }
+
+  function selectFont(fontName) {
+    var selected = String(fontName || "").trim();
+    if (!selected || !els.fontInput) {
+      return;
+    }
+    els.fontInput.value = selected;
+    if (els.fontPickerValue) {
+      els.fontPickerValue.textContent = selected;
+      els.fontPickerValue.style.fontFamily = fontFamilyCss(selected);
+    }
+    closeFontPicker();
+    checkFontAvailability();
+    updatePresetFromControls();
+    renderPresetPreview();
+  }
+
+  function normalizeFontQuery(value) {
+    return String(value || "").trim().toLocaleLowerCase("tr-TR");
+  }
+
+  function fontFamilyCss(value) {
+    var clean = String(value || "").replace(/["\\]/g, "");
+    return clean ? '"' + clean + '", sans-serif' : "";
+  }
+
+  function isSystemFontInstalled(value) {
+    var query = String(value || "").trim().toLocaleLowerCase();
+    if (!query) {
+      return false;
+    }
+    return (state.systemFonts || []).some(function (font) {
+      return String(font || "").trim().toLocaleLowerCase() === query;
+    });
   }
 
   function checkFontAvailability() {
-    if (!els.fontInput || els.fontInput.tagName !== "SELECT") {
+    if (!els.fontInput) {
       return;
     }
     var fonts = state.systemFonts || [];
-    var currentFont = els.fontInput.value;
+    var currentFont = String(els.fontInput.value || "").trim();
     var warningEl = document.querySelector("#fontWarning");
     if (!warningEl || !fonts.length) {
       return;
     }
-    var isInstalled = fonts.indexOf(currentFont) !== -1;
+    var isInstalled = isSystemFontInstalled(currentFont);
+    if (els.fontPickerValue) {
+      els.fontPickerValue.style.fontFamily = fontFamilyCss(currentFont);
+    }
     if (isInstalled) {
       warningEl.classList.add("hidden-field");
       warningEl.textContent = "";
@@ -1975,6 +2331,20 @@
     });
   }
 
+  function getSequenceInfo(callback) {
+    if (!window.__adobe_cep__ || typeof window.__adobe_cep__.evalScript !== "function") {
+      callback({ ok: false, width: state.sequenceWidth || 1080, height: state.sequenceHeight || 1920 });
+      return;
+    }
+    window.__adobe_cep__.evalScript("capitonGetSequenceInfo()", function (raw) {
+      try {
+        callback(JSON.parse(raw));
+      } catch (error) {
+        callback({ ok: false, width: state.sequenceWidth || 1080, height: state.sequenceHeight || 1920 });
+      }
+    });
+  }
+
   function renderCaptionOverlay(callback, options) {
     var overlayPreset = buildOverlayPresetPayload();
     var overlayCaptions = overlayPreset.karaokeCaptions || [];
@@ -1984,19 +2354,107 @@
           return !caption.hidden;
         });
     var naturalDuration = maxCaptionEnd(renderCaptions) + 0.2;
-    var clipDuration = Number(state.latestClipDurationSeconds || 0);
-    var renderDuration = clipDuration > 0 ? Math.max(0.2, clipDuration) : naturalDuration;
-    var payload = {
-      captions: renderCaptions,
-      preset: overlayPreset,
-      width: 1080,
-      height: 1920,
-      durationSeconds: renderDuration
-    };
-    if (options && options.outputPath) {
-      payload.outputPath = options.outputPath;
+    // Render only through the final caption. Encoding transparent frames for
+    // a long silent tail made both rendering and Premiere import much slower.
+    var renderDuration = Math.max(0.2, naturalDuration);
+    getSequenceInfo(function (sequenceInfo) {
+      var width = Number(sequenceInfo && sequenceInfo.width) || state.sequenceWidth || 1080;
+      var height = Number(sequenceInfo && sequenceInfo.height) || state.sequenceHeight || 1920;
+      state.sequenceWidth = width;
+      state.sequenceHeight = height;
+      var payload = {
+        captions: renderCaptions,
+        preset: overlayPreset,
+        width: width,
+        height: height,
+        durationSeconds: renderDuration
+      };
+      if (options && options.outputPath) {
+        payload.outputPath = options.outputPath;
+      }
+      callEngine("/render-overlay", payload, callback);
+    });
+  }
+
+  function syncEsrarengizWatermark(durationSeconds, callback) {
+    var isSupportedPreset = isEsrarengizWatermarkPreset(state.preset);
+    var enabled = isSupportedPreset && state.preset.watermarkEnabled !== false;
+    var safeDuration = Math.max(0.2, Number(durationSeconds || state.latestClipDurationSeconds || 0.2));
+
+    if (!window.__adobe_cep__ || typeof window.__adobe_cep__.evalScript !== "function") {
+      callback({ ok: false, message: "Premiere CEP köprüsü bulunamadı." });
+      return;
     }
-    callEngine("/render-overlay", payload, callback);
+
+    if (!enabled) {
+      window.__adobe_cep__.evalScript(
+        "capitonRemoveWatermarkLayers(" + Number(state.latestTimelineStartSeconds || 0) + ", " + safeDuration + ")",
+        function (raw) {
+          try {
+            callback(JSON.parse(raw));
+          } catch (error) {
+            callback({ ok: false, message: "Watermark kapatma cevabı okunamadı." });
+          }
+        }
+      );
+      return;
+    }
+
+    getSequenceInfo(function (sequenceInfo) {
+      var width = Number(sequenceInfo && sequenceInfo.width) || state.sequenceWidth || 1080;
+      var height = Number(sequenceInfo && sequenceInfo.height) || state.sequenceHeight || 1920;
+      callEngine(
+        "/render-watermark",
+        {
+          preset: copy(state.preset),
+          width: width,
+          height: height
+        },
+        function (watermarkResult) {
+          if (!watermarkResult.ok) {
+            callback(watermarkResult);
+            return;
+          }
+          window.__adobe_cep__.evalScript(
+            'capitonImportWatermarkFile("' +
+              escapeForJsx(watermarkResult.watermarkPath) +
+              '", ' +
+              Number(state.latestTimelineStartSeconds || 0) +
+              ", " +
+              safeDuration +
+              ", 20)",
+            function (raw) {
+              try {
+                callback(JSON.parse(raw));
+              } catch (error) {
+                callback({ ok: false, message: "Watermark timeline cevabı okunamadı: " + (raw || error.message) });
+              }
+            }
+          );
+        }
+      );
+    });
+  }
+
+  function findExistingOverlay(startSeconds, durationSeconds, callback) {
+    if (!window.__adobe_cep__ || typeof window.__adobe_cep__.evalScript !== "function") {
+      callback({ ok: false, mediaPath: "" });
+      return;
+    }
+    window.__adobe_cep__.evalScript(
+      "capitonFindExistingOverlay(" +
+        Number(startSeconds || 0) +
+        ", " +
+        Number(durationSeconds || 0) +
+        ", true)",
+      function (raw) {
+        try {
+          callback(JSON.parse(raw));
+        } catch (error) {
+          callback({ ok: false, mediaPath: "" });
+        }
+      }
+    );
   }
 
   function importOverlayFile(mediaPath, startSeconds, durationSeconds, callback) {
@@ -2207,46 +2665,73 @@
 
   function applySynchronizedOverlayToTimeline(options) {
     var forceImport = !!(options && options.forceImport);
-    var existingOverlayPath = forceImport ? "" : state.latestOverlayPath;
     beginApplyProgress(forceImport ? "Altyazı yeniden üretilip zaman çizelgesine basılıyor" : "Kelime vurgulu altyazı render ediliyor");
-    writeLog(
-      (forceImport
-        ? "Yeni senkron kelime vurgulu altyazı render ediliyor; timeline'a yeniden eklenecek."
-        : existingOverlayPath
-        ? "Senkron görsel altyazı yeniden render ediliyor; zaman çizelgesindeki mevcut dosya güncellenecek."
-        : "Senkron kelime vurgulu görsel altyazı render ediliyor.") +
-        "\nEkrandaki kelime: " +
-        state.wordsPerScreen
-    );
-    renderCaptionOverlay(function (overlayResult) {
-      if (!overlayResult.ok) {
+    function finishWithWatermark(message, durationSeconds) {
+      syncEsrarengizWatermark(durationSeconds, function (watermarkResult) {
         finishApplyProgress();
-        writeLog((overlayResult.message || "Senkron görsel altyazı üretilemedi.") + "\nZaman çizelgesine hatalı MOGRT yedeği eklenmedi.");
-        return;
-      }
-
-      if (existingOverlayPath) {
-        replaceOverlayFile(existingOverlayPath, overlayResult.overlayPath, state.latestTimelineStartSeconds, function (replaceResult) {
+        var watermarkMessage = watermarkResult && watermarkResult.message ? "\n" + watermarkResult.message : "";
+        writeLog(message + watermarkMessage);
+      });
+    }
+    findExistingOverlay(state.latestTimelineStartSeconds, state.latestClipDurationSeconds, function (found) {
+      var existingOverlayPath = (found && found.mediaPath) || state.latestOverlayPath || "";
+      var duplicateNote = found && found.removedDuplicates
+        ? "\n" + found.removedDuplicates + " eski yinelenen Zola katmanı temizlendi."
+        : "";
+      writeLog(
+        (existingOverlayPath
+          ? "Zola altyazısı yeniden render ediliyor; mevcut timeline katmanı güncellenecek."
+          : "Senkron kelime vurgulu görsel altyazı render ediliyor.") +
+          "\nEkrandaki kelime: " +
+          state.wordsPerScreen +
+          duplicateNote
+      );
+      renderCaptionOverlay(function (overlayResult) {
+        if (!overlayResult.ok) {
           finishApplyProgress();
-          if (replaceResult.ok) {
-            state.latestOverlayPath = overlayResult.overlayPath;
-          }
-          writeLog(
-            (overlayResult.message || "Senkron görsel altyazı güncellendi.") +
-              "\n" +
-              (replaceResult.message || "Premiere medya değiştirme sonucu alınamadı.")
-          );
-        });
-        return;
-      }
-
-      writeLog((overlayResult.message || "Senkron görsel altyazı üretildi.") + "\nPremiere zaman çizelgesine ekleniyor...");
-      importOverlayFile(overlayResult.overlayPath, state.latestTimelineStartSeconds, 0, function (result) {
-        finishApplyProgress();
-        if (result.ok) {
-          state.latestOverlayPath = overlayResult.overlayPath;
+          writeLog((overlayResult.message || "Senkron görsel altyazı üretilemedi.") + "\nZaman çizelgesine hatalı MOGRT yedeği eklenmedi.");
+          return;
         }
-        writeLog(result.message || "Görsel altyazı içe aktarma sonucu alınamadı.");
+
+        if (existingOverlayPath) {
+          replaceOverlayFile(
+            existingOverlayPath,
+            overlayResult.overlayPath,
+            state.latestTimelineStartSeconds,
+            function (replaceResult) {
+              if (replaceResult.ok) {
+                state.latestOverlayPath = overlayResult.overlayPath;
+                finishWithWatermark(
+                  (replaceResult.message || overlayResult.message || "Zaman çizelgesindeki Zola altyazısı güncellendi.") + duplicateNote,
+                  overlayResult.durationSeconds || state.latestClipDurationSeconds
+                );
+                return;
+              }
+              finishApplyProgress();
+              writeLog((replaceResult.message || "Zola altyazısı güncellenemedi.") + duplicateNote);
+            }
+          );
+          return;
+        }
+
+        writeLog((overlayResult.message || "Senkron görsel altyazı üretildi.") + "\nPremiere zaman çizelgesine ekleniyor...");
+        importOverlayFile(
+          overlayResult.overlayPath,
+          state.latestTimelineStartSeconds,
+          overlayResult.durationSeconds || state.latestClipDurationSeconds,
+          function (result) {
+            if (result.ok) {
+              state.latestOverlayPath = overlayResult.overlayPath;
+              finishWithWatermark(
+                result.message || "Görsel altyazı zaman çizelgesine eklendi.",
+                overlayResult.durationSeconds || state.latestClipDurationSeconds
+              );
+              return;
+            }
+            finishApplyProgress();
+            writeLog(result.message || "Görsel altyazı içe aktarma sonucu alınamadı.");
+          }
+        );
       });
     });
   }
@@ -2268,6 +2753,10 @@
 
   function renderPresetPreview() {
     var preset = state.preset;
+    var showWatermark = isEsrarengizWatermarkPreset(preset) && preset.watermarkEnabled !== false;
+    if (els.previewWatermark) {
+      els.previewWatermark.style.display = showWatermark ? "block" : "none";
+    }
     if (els.previewVideo) {
       els.previewVideo.removeAttribute("src");
       els.previewVideo.removeAttribute("poster");
@@ -2280,9 +2769,13 @@
 
     if (state.activeStyleTab === "style") {
       var words = (sample || "Hi, I'm Hannah.").split(/\s+/);
-      var mid = Math.ceil(words.length / 2);
-      var line1 = words.slice(0, mid).join(" ");
-      var line2 = words.slice(mid).join(" ");
+      var line1 = words.join(" ");
+      var line2 = "";
+      if (preset.multiLine && words.length > 1) {
+        var mid = Math.ceil(words.length / 2);
+        line1 = words.slice(0, mid).join(" ");
+        line2 = words.slice(mid).join(" ");
+      }
       var scale = 0.52;
       var fontSize = Math.max(10, Math.round(Number(preset.fontSize || 56) * scale));
       var primaryColor = preset.primaryColor || "#ffffff";
@@ -2298,12 +2791,18 @@
         }
       }
       if (preset.shadowEnabled !== false && !preset.boxEnabled) {
-        shadows.push("0 3px 8px rgba(0,0,0,0.7)");
+        var shadowDirection = Number(preset.shadowDirection == null ? 135 : preset.shadowDirection) * Math.PI / 180;
+        var shadowDistance = Math.max(0, Number(preset.shadowDistance == null ? 4 : preset.shadowDistance)) * scale;
+        var shadowX = Math.round(Math.cos(shadowDirection) * shadowDistance);
+        var shadowY = Math.round(Math.sin(shadowDirection) * shadowDistance);
+        var shadowBlur = Math.max(0, Number(preset.shadowBlur == null ? 2 : preset.shadowBlur)) * scale;
+        var shadowOpacity = Math.max(0, Math.min(100, Number(preset.shadowOpacity == null ? 65 : preset.shadowOpacity))) / 100;
+        shadows.push(shadowX + "px " + shadowY + "px " + shadowBlur + "px " + hexToRgba(preset.shadowColor || "#000000", shadowOpacity));
       }
       var boxCss = preset.boxEnabled
-        ? "background:" + (preset.boxColor || primaryColor) + ";border-radius:6px;padding:3px 8px;box-decoration-break:clone;-webkit-box-decoration-break:clone;"
+        ? "background:" + hexToRgba(preset.boxColor || "#000000", Math.max(0, Math.min(100, Number(preset.boxOpacity == null ? 80 : preset.boxOpacity))) / 100) + ";border-radius:" + Math.max(0, Number(preset.boxBorderRadius == null ? 6 : preset.boxBorderRadius) * scale) + "px;padding:" + Math.max(0, Number(preset.boxPadding == null ? 8 : preset.boxPadding) * scale) + "px;box-decoration-break:clone;-webkit-box-decoration-break:clone;"
         : "";
-      var lineCss = "font-family:" + (preset.fontFamily || "Inter") + ";font-size:" + fontSize + "px;font-weight:900;line-height:1.15;color:" + primaryColor + ";text-shadow:" + (shadows.join(",") || "none") + ";display:block;text-align:center;" + boxCss;
+      var lineCss = "font-family:" + fontFamilyCss(preset.fontFamily || "Inter") + ";font-size:" + fontSize + "px;font-weight:" + Number(preset.fontWeight || 900) + ";font-style:" + (preset.italicEnabled ? "italic" : "normal") + ";text-decoration:" + (preset.underlineEnabled ? "underline" : "none") + ";letter-spacing:" + Number(preset.letterSpacing || 0) * scale + "px;line-height:1.15;color:" + primaryColor + ";text-shadow:" + (shadows.join(",") || "none") + ";display:block;text-align:center;" + boxCss;
       var accentWord = words[1] || words[0] || "";
       var makeAccent = function(text) {
         if (!accentWord) { return text; }
@@ -2356,10 +2855,32 @@
   }
 
   function syncPresetControls() {
-    if (els.fontInput && els.fontInput.tagName === "SELECT" && state.systemFonts && state.systemFonts.length) {
+    if (els.fontInput && state.systemFonts && state.systemFonts.length) {
       populateFontSelect(state.preset.fontFamily || "Inter");
-    } else {
+    } else if (els.fontInput) {
       els.fontInput.value = state.preset.fontFamily;
+      if (els.fontPickerValue) {
+        els.fontPickerValue.textContent = state.preset.fontFamily;
+        els.fontPickerValue.style.fontFamily = fontFamilyCss(state.preset.fontFamily);
+      }
+    }
+    if (els.fontWeightInput) {
+      els.fontWeightInput.value = String(state.preset.fontWeight || 900);
+    }
+    if (els.italicEnabledInput) {
+      els.italicEnabledInput.checked = !!state.preset.italicEnabled;
+    }
+    if (els.underlineEnabledInput) {
+      els.underlineEnabledInput.checked = !!state.preset.underlineEnabled;
+    }
+    if (els.watermarkSettingsRow) {
+      els.watermarkSettingsRow.classList.toggle("hidden-field", !isEsrarengizWatermarkPreset(state.preset));
+    }
+    if (els.watermarkEnabledInput) {
+      els.watermarkEnabledInput.checked = state.preset.watermarkEnabled !== false;
+    }
+    if (els.letterSpacingInput) {
+      els.letterSpacingInput.value = Number(state.preset.letterSpacing || 0);
     }
     els.primaryColorInput.value = state.preset.primaryColor;
     els.accentColorInput.value = state.preset.accentColor;
@@ -2367,7 +2888,7 @@
       els.strokeColorInput.value = state.preset.strokeColor || "#000000";
     }
     if (els.strokeWidthInput) {
-      els.strokeWidthInput.value = state.preset.strokeWidth || 5;
+      els.strokeWidthInput.value = state.preset.strokeWidth == null ? 5 : state.preset.strokeWidth;
     }
     if (els.fontSizeInput) {
       els.fontSizeInput.value = state.preset.fontSize || 56;
@@ -2375,8 +2896,32 @@
     if (els.boxEnabledInput) {
       els.boxEnabledInput.checked = !!state.preset.boxEnabled;
     }
+    if (els.boxColorInput) {
+      els.boxColorInput.value = state.preset.boxColor || "#000000";
+    }
+    if (els.boxOpacityInput) {
+      els.boxOpacityInput.value = Number(state.preset.boxOpacity == null ? 80 : state.preset.boxOpacity);
+    }
+    if (els.boxPaddingInput) {
+      els.boxPaddingInput.value = Number(state.preset.boxPadding == null ? 8 : state.preset.boxPadding);
+    }
     if (els.shadowEnabledInput) {
       els.shadowEnabledInput.checked = state.preset.shadowEnabled !== false;
+    }
+    if (els.shadowColorInput) {
+      els.shadowColorInput.value = state.preset.shadowColor || "#000000";
+    }
+    if (els.shadowOpacityInput) {
+      els.shadowOpacityInput.value = Number(state.preset.shadowOpacity == null ? 65 : state.preset.shadowOpacity);
+    }
+    if (els.shadowDistanceInput) {
+      els.shadowDistanceInput.value = Number(state.preset.shadowDistance == null ? 4 : state.preset.shadowDistance);
+    }
+    if (els.shadowBlurInput) {
+      els.shadowBlurInput.value = Number(state.preset.shadowBlur == null ? 2 : state.preset.shadowBlur);
+    }
+    if (els.shadowDirectionInput) {
+      els.shadowDirectionInput.value = Number(state.preset.shadowDirection == null ? 135 : state.preset.shadowDirection);
     }
     if (els.positionXInput) {
       els.positionXInput.value = state.preset.positionX || 0;
@@ -2444,13 +2989,28 @@
   function updatePresetFromControls(options) {
     var skipRender = !!(options && options.skipRender);
     state.preset.fontFamily = els.fontInput ? els.fontInput.value || "Inter" : state.preset.fontFamily || "Inter";
+    state.preset.fontWeight = els.fontWeightInput ? Number(els.fontWeightInput.value || 900) : state.preset.fontWeight || 900;
+    state.preset.italicEnabled = els.italicEnabledInput ? !!els.italicEnabledInput.checked : !!state.preset.italicEnabled;
+    state.preset.underlineEnabled = els.underlineEnabledInput ? !!els.underlineEnabledInput.checked : !!state.preset.underlineEnabled;
+    if (isEsrarengizWatermarkPreset(state.preset)) {
+      state.preset.watermarkEnabled = els.watermarkEnabledInput ? !!els.watermarkEnabledInput.checked : state.preset.watermarkEnabled !== false;
+    }
+    state.preset.letterSpacing = els.letterSpacingInput ? Number(els.letterSpacingInput.value || 0) : state.preset.letterSpacing || 0;
     state.preset.primaryColor = els.primaryColorInput ? els.primaryColorInput.value : state.preset.primaryColor || "#ffffff";
     state.preset.accentColor = els.accentColorInput ? els.accentColorInput.value : state.preset.accentColor || "#fff200";
     state.preset.strokeColor = els.strokeColorInput ? els.strokeColorInput.value : state.preset.strokeColor || "#000000";
-    state.preset.strokeWidth = els.strokeWidthInput ? Number(els.strokeWidthInput.value || 5) : state.preset.strokeWidth || 5;
+    state.preset.strokeWidth = els.strokeWidthInput ? Number(els.strokeWidthInput.value) : state.preset.strokeWidth == null ? 5 : state.preset.strokeWidth;
     state.preset.fontSize = els.fontSizeInput ? Number(els.fontSizeInput.value || 56) : state.preset.fontSize || 56;
     state.preset.boxEnabled = els.boxEnabledInput ? !!els.boxEnabledInput.checked : !!state.preset.boxEnabled;
+    state.preset.boxColor = els.boxColorInput ? els.boxColorInput.value : state.preset.boxColor || "#000000";
+    state.preset.boxOpacity = els.boxOpacityInput ? Number(els.boxOpacityInput.value || 0) : state.preset.boxOpacity == null ? 80 : state.preset.boxOpacity;
+    state.preset.boxPadding = els.boxPaddingInput ? Number(els.boxPaddingInput.value || 0) : state.preset.boxPadding == null ? 8 : state.preset.boxPadding;
     state.preset.shadowEnabled = els.shadowEnabledInput ? !!els.shadowEnabledInput.checked : state.preset.shadowEnabled !== false;
+    state.preset.shadowColor = els.shadowColorInput ? els.shadowColorInput.value : state.preset.shadowColor || "#000000";
+    state.preset.shadowOpacity = els.shadowOpacityInput ? Number(els.shadowOpacityInput.value || 0) : state.preset.shadowOpacity == null ? 65 : state.preset.shadowOpacity;
+    state.preset.shadowDistance = els.shadowDistanceInput ? Number(els.shadowDistanceInput.value || 0) : state.preset.shadowDistance == null ? 4 : state.preset.shadowDistance;
+    state.preset.shadowBlur = els.shadowBlurInput ? Number(els.shadowBlurInput.value || 0) : state.preset.shadowBlur == null ? 2 : state.preset.shadowBlur;
+    state.preset.shadowDirection = els.shadowDirectionInput ? Number(els.shadowDirectionInput.value || 135) : state.preset.shadowDirection == null ? 135 : state.preset.shadowDirection;
     state.preset.positionX = els.positionXInput ? Number(els.positionXInput.value || 0) : state.preset.positionX || 0;
     state.preset.positionY = els.positionYInput ? Number(els.positionYInput.value || 76) : state.preset.positionY || 76;
     state.preset.paddingLeft = els.paddingLeftInput ? Number(els.paddingLeftInput.value || 40) : state.preset.paddingLeft || 40;
@@ -2646,6 +3206,7 @@
   function splitCaptionsForEditor(captions) {
     var maxWords = clampWordsPerScreen(state.wordsPerScreen);
     var next = [];
+    var wordStream = [];
 
     (captions || []).forEach(function (caption) {
       var clean = String(caption.text || "").replace(/\s+/g, " ").trim();
@@ -2655,7 +3216,12 @@
 
       var wordTexts = clean.split(" ").filter(Boolean);
       var timedWords = buildEditorWordItems(caption, wordTexts);
-      splitWordItemsBySmartLimit(timedWords, maxWords).forEach(function (group) {
+      timedWords.forEach(function (word) {
+        wordStream.push(word);
+      });
+    });
+
+    splitWordItemsByMeaning(wordStream, maxWords).forEach(function (group) {
         if (!group.length) {
           return;
         }
@@ -2677,10 +3243,86 @@
             return { text: item.text, start: Number(item.start), end: Number(item.end) };
           })
         });
-      });
     });
 
     return next;
+  }
+
+  function splitWordItemsByMeaning(wordItems, maxWords) {
+    var phrases = [];
+    var phrase = [];
+    var safeMax = clampWordsPerScreen(maxWords);
+
+    (wordItems || []).forEach(function (word, index) {
+      phrase.push(word);
+      var text = String(word.text || "");
+      var nextWord = wordItems[index + 1];
+      var gap = nextWord ? Number(nextWord.start) - Number(word.end) : 0;
+      var sentenceEnd = /[.!?…]+["'”’)]*$/.test(text);
+      var temporalIntro = /[,،]+["'”’)]*$/.test(text) && isShortTemporalIntro(phrase);
+      var longPause = !!nextWord && isFinite(gap) && gap >= 0.72;
+
+      if (sentenceEnd || temporalIntro || longPause || !nextWord) {
+        balancedMeaningGroups(phrase, safeMax).forEach(function (group) {
+          phrases.push(group);
+        });
+        phrase = [];
+      }
+    });
+
+    return phrases;
+  }
+
+  function isShortTemporalIntro(words) {
+    if (!words.length || words.length > 3) {
+      return false;
+    }
+    var clean = words.map(function (word) {
+      return normalizeWordForTiming(word.text);
+    }).join(" ");
+    return /^(o gece|o sırada|o anda|bu sırada|aynı gece|ertesi gün|daha sonra|bir süre sonra)$/.test(clean);
+  }
+
+  function balancedMeaningGroups(words, maxWords) {
+    var items = words || [];
+    if (items.length <= maxWords) {
+      return items.length ? [items.slice()] : [];
+    }
+
+    var groupCount = Math.ceil(items.length / maxWords);
+    var baseSize = Math.floor(items.length / groupCount);
+    var extra = items.length - baseSize * groupCount;
+    var sizes = [];
+    var i;
+    for (i = 0; i < groupCount; i += 1) {
+      sizes.push(baseSize);
+    }
+
+    if (extra === groupCount - 1 && groupCount > 3) {
+      for (i = 1; i < groupCount; i += 1) {
+        sizes[i] += 1;
+      }
+    } else if (extra === 1) {
+      sizes[Math.floor(groupCount / 2)] += 1;
+    } else if (groupCount === 3 && extra === 2) {
+      sizes[0] += 1;
+      sizes[2] += 1;
+    } else {
+      for (i = 0; i < extra; i += 1) {
+        sizes[groupCount - 1 - i] += 1;
+      }
+    }
+
+    var groups = [];
+    var offset = 0;
+    sizes.forEach(function (size) {
+      var group = items.slice(offset, offset + size);
+      if (group.length) {
+        groups.push(group);
+      }
+      offset += size;
+    });
+    return groups;
   }
 
   function buildEditorWordItems(caption, wordTexts) {
@@ -3118,221 +3760,71 @@
   }
 
   function buildCaptioneerPresets() {
+    function importedCutbackPreset(values) {
+      var positionY = 50 + (Number(values.y || 0) / Number(values.height || 1920)) * 100;
+      return {
+        id: "cutback-" + values.id,
+        name: values.name,
+        previewText: "Altyazı önizlemesi",
+        description: "Cutback kişisel şablonlarından birebir aktarıldı.",
+        fontFamily: values.font,
+        fontWeight: values.weight,
+        primaryColor: values.primary,
+        secondaryColor: values.primary,
+        accentColor: values.accent,
+        strokeColor: values.stroke || "#000000",
+        strokeOpacity: values.strokeOpacity == null ? 100 : values.strokeOpacity,
+        shadowColor: values.shadow || "#000000",
+        shadowOpacity: values.shadowOpacity == null ? 100 : values.shadowOpacity,
+        boxColor: values.box || "#ffffff",
+        boxOpacity: values.boxOpacity == null ? 100 : values.boxOpacity,
+        strokeWidth: values.strokeWidth,
+        fontSize: values.fontSize,
+        letterSpacing: values.letterSpacing || 0,
+        animation: "none",
+        boxEnabled: !!values.boxEnabled,
+        boxPadding: values.boxPadding == null ? 5 : values.boxPadding,
+        boxBorderRadius: values.boxBorderRadius == null ? 5 : values.boxBorderRadius,
+        shadowEnabled: values.shadowEnabled !== false,
+        shadowDirection: ((Number(values.shadowDirection || 0) % 360) + 360) % 360,
+        shadowDistance: Number(values.shadowDistance || 0),
+        shadowBlur: Number(values.shadowBlur || 0),
+        pastTextEnabled: !!values.pastTextEnabled,
+        pastTextColor: values.pastTextColor || "#000000",
+        positionX: Number(values.x || 0),
+        positionY: Math.max(5, Math.min(95, positionY)),
+        paddingLeft: values.paddingLeft == null ? 40 : values.paddingLeft,
+        paddingRight: values.paddingRight == null ? 40 : values.paddingRight,
+        scale: values.scale == null ? 1 : values.scale,
+        templateReferenceWidth: values.width,
+        templateReferenceHeight: values.height,
+        watermarkEnabled: values.watermarkEnabled === true,
+        letterCase: "as-typed"
+      };
+    }
+
     return [
-      {
-        id: "custom-uncali-testimonial",
-        name: "Uncalı Testimonial",
-        previewText: "Altyazı önizlemesi",
-        description: "Beyaz metin, turkuaz kelime vurgusu.",
-        fontFamily: "Inter",
-        primaryColor: "#ffffff",
-        accentColor: "#49d9ff",
-        strokeColor: "#000000",
-        shadowColor: "#000000",
-        boxColor: "#000000",
-        strokeWidth: 5,
-        fontSize: 56,
-        animation: "none",
-        boxEnabled: false,
-        shadowEnabled: true,
-        positionX: 0,
-        positionY: 76,
-        scale: 1,
-        letterCase: "as-typed"
-      },
-      {
-        id: "custom-duygu-aksoy",
-        name: "Duygu Aksoy",
-        previewText: "Altyazı önizlemesi",
-        description: "Beyaz metin, sıcak sarı vurgu.",
-        fontFamily: "Inter",
-        primaryColor: "#ffffff",
-        accentColor: "#ffc94a",
-        strokeColor: "#000000",
-        shadowColor: "#000000",
-        boxColor: "#000000",
-        strokeWidth: 5,
-        fontSize: 56,
-        animation: "none",
-        boxEnabled: false,
-        shadowEnabled: true,
-        positionX: 0,
-        positionY: 76,
-        scale: 1,
-        letterCase: "as-typed"
-      },
-      {
-        id: "custom-isin-dental",
-        name: "ışın dental",
-        previewText: "Altyazı önizlemesi",
-        description: "Diş kliniği için temiz mavi vurgu.",
-        fontFamily: "Inter",
-        primaryColor: "#ffffff",
-        accentColor: "#8fe9ff",
-        strokeColor: "#000000",
-        shadowColor: "#000000",
-        boxColor: "#000000",
-        strokeWidth: 5,
-        fontSize: 56,
-        animation: "none",
-        boxEnabled: false,
-        shadowEnabled: true,
-        positionX: 0,
-        positionY: 76,
-        scale: 1,
-        letterCase: "as-typed"
-      },
-      {
-        id: "custom-thera",
-        name: "thera",
-        previewText: "Altyazı önizlemesi",
-        description: "Yumuşak sağlık/terapi tonu.",
-        fontFamily: "Inter",
-        primaryColor: "#ffffff",
-        accentColor: "#8fffe0",
-        strokeColor: "#000000",
-        shadowColor: "#000000",
-        boxColor: "#000000",
-        strokeWidth: 5,
-        fontSize: 56,
-        animation: "none",
-        boxEnabled: false,
-        shadowEnabled: true,
-        positionX: 0,
-        positionY: 76,
-        scale: 1,
-        letterCase: "as-typed"
-      },
-      {
-        id: "custom-remax",
-        name: "RE/MAX",
-        previewText: "Altyazı önizlemesi",
-        description: "Kurumsal mavi vurgu.",
-        fontFamily: "Inter",
-        primaryColor: "#ffffff",
-        accentColor: "#2f80ff",
-        strokeColor: "#000000",
-        shadowColor: "#000000",
-        boxColor: "#000000",
-        strokeWidth: 5,
-        fontSize: 56,
-        animation: "none",
-        boxEnabled: false,
-        shadowEnabled: true,
-        positionX: 0,
-        positionY: 76,
-        scale: 1,
-        letterCase: "as-typed"
-      },
-      {
-        id: "custom-mahru",
-        name: "mahru",
-        previewText: "Altyazı önizlemesi",
-        description: "Mor/pembe vurgu.",
-        fontFamily: "Inter",
-        primaryColor: "#ffffff",
-        accentColor: "#e889ff",
-        strokeColor: "#000000",
-        shadowColor: "#000000",
-        boxColor: "#000000",
-        strokeWidth: 5,
-        fontSize: 56,
-        animation: "none",
-        boxEnabled: false,
-        shadowEnabled: true,
-        positionX: 0,
-        positionY: 76,
-        scale: 1,
-        letterCase: "as-typed"
-      },
-      {
-        id: "custom-syk",
-        name: "syk",
-        previewText: "Altyazı önizlemesi",
-        description: "Lime yeşil vurgu.",
-        fontFamily: "Inter",
-        primaryColor: "#ffffff",
-        accentColor: "#a6ff00",
-        strokeColor: "#000000",
-        shadowColor: "#000000",
-        boxColor: "#000000",
-        strokeWidth: 5,
-        fontSize: 56,
-        animation: "none",
-        boxEnabled: false,
-        shadowEnabled: true,
-        positionX: 0,
-        positionY: 76,
-        scale: 1,
-        letterCase: "as-typed"
-      },
-      {
-        id: "custom-feta",
-        name: "feta",
-        previewText: "Altyazı önizlemesi",
-        description: "Sıcak sarı/marka tonu.",
-        fontFamily: "Inter",
-        primaryColor: "#ffffff",
-        accentColor: "#ffe66d",
-        strokeColor: "#000000",
-        shadowColor: "#000000",
-        boxColor: "#000000",
-        strokeWidth: 5,
-        fontSize: 56,
-        animation: "none",
-        boxEnabled: false,
-        shadowEnabled: true,
-        positionX: 0,
-        positionY: 76,
-        scale: 1,
-        letterCase: "as-typed"
-      },
-      {
-        id: "custom-nfs",
-        name: "nfs",
-        previewText: "Altyazı önizlemesi",
-        description: "Mavi vurgulu sosyal medya stili.",
-        fontFamily: "Inter",
-        primaryColor: "#ffffff",
-        accentColor: "#55b8ff",
-        strokeColor: "#000000",
-        shadowColor: "#000000",
-        boxColor: "#000000",
-        strokeWidth: 5,
-        fontSize: 56,
-        animation: "none",
-        boxEnabled: false,
-        shadowEnabled: true,
-        positionX: 0,
-        positionY: 76,
-        scale: 1,
-        letterCase: "as-typed"
-      },
-      {
-        id: "custom-miyimp",
-        name: "mıyımp",
-        previewText: "Altyazı önizlemesi",
-        description: "Pembe/mor marka vurgusu.",
-        fontFamily: "Inter",
-        primaryColor: "#ffffff",
-        accentColor: "#ff8bdc",
-        strokeColor: "#000000",
-        shadowColor: "#000000",
-        boxColor: "#000000",
-        strokeWidth: 5,
-        fontSize: 56,
-        animation: "none",
-        boxEnabled: false,
-        shadowEnabled: true,
-        positionX: 0,
-        positionY: 76,
-        scale: 1,
-        letterCase: "as-typed"
-      }
-    ].map(function (preset, index) {
+      { id: "uncali-testimonial", name: "Uncali Testimonial", width: 1280, height: 720, x: 0, y: 0, font: "Montserrat-Black", weight: 900, fontSize: 57, primary: "#ffffff", accent: "#00cbd9", stroke: "#000000", strokeWidth: 6, shadowEnabled: true, shadow: "#000000", shadowDirection: 0, shadowDistance: 0, shadowBlur: 7, scale: 1.2, paddingLeft: 40, paddingRight: 40 },
+      { id: "duygu-aksoy", name: "Duygu Aksoy", width: 1280, height: 720, x: 0, y: 312, font: "Montserrat-Black", weight: 900, fontSize: 57, primary: "#ffffff", accent: "#ffcc5d", stroke: "#000000", strokeWidth: 5, shadowEnabled: true, shadow: "#000000", shadowDirection: 0, shadowDistance: 0, shadowBlur: 7, scale: 1.2, paddingLeft: 40, paddingRight: 40 },
+      { id: "isin-dental", name: "ışın dental", width: 1280, height: 720, x: 0, y: 312, font: "Montserrat-Black", weight: 900, fontSize: 57, primary: "#ffffff", accent: "#a5f9ff", stroke: "#000000", strokeWidth: 6, shadowEnabled: true, shadow: "#000000", shadowDirection: 0, shadowDistance: 0, shadowBlur: 7, scale: 1.2, paddingLeft: 40, paddingRight: 40 },
+      { id: "thera", name: "thera", width: 1080, height: 1920, x: 0, y: 312, font: "Montserrat-Black", weight: 900, fontSize: 57, primary: "#ffffff", accent: "#a9f9db", stroke: "#000000", strokeWidth: 3, shadowEnabled: true, shadow: "#000000", shadowDirection: 0, shadowDistance: 0, shadowBlur: 7, scale: 1.2, paddingLeft: 40, paddingRight: 40 },
+      { id: "remax", name: "RE/MAX", width: 1080, height: 1920, x: 0, y: 0, font: "Montserrat-Black", weight: 900, fontSize: 57, primary: "#ffffff", accent: "#3971ff", stroke: "#000000", strokeWidth: 6, shadowEnabled: true, shadow: "#000000", shadowDirection: 0, shadowDistance: 0, shadowBlur: 7, scale: 1, paddingLeft: 40, paddingRight: 40 },
+      { id: "mahru", name: "mahru", width: 1080, height: 1920, x: 0, y: 312, font: "Montserrat-Black", weight: 900, fontSize: 57, primary: "#ffffff", accent: "#eaa2f2", stroke: "#000000", strokeWidth: 3, shadowEnabled: true, shadow: "#000000", shadowDirection: 0, shadowDistance: 0, shadowBlur: 7, scale: 1.2, paddingLeft: 40, paddingRight: 40 },
+      { id: "syk", name: "syk", width: 1080, height: 1920, x: 0, y: 312, font: "Montserrat-Black", weight: 900, fontSize: 57, primary: "#ffffff", accent: "#a5f9ff", stroke: "#000000", strokeWidth: 3, shadowEnabled: true, shadow: "#000000", shadowDirection: 0, shadowDistance: 0, shadowBlur: 7, scale: 1.2, paddingLeft: 40, paddingRight: 40 },
+      { id: "feta", name: "feta", width: 1080, height: 1920, x: 0, y: 312, font: "Montserrat-Black", weight: 900, fontSize: 57, primary: "#ffffff", accent: "#6ed0ff", stroke: "#000000", strokeWidth: 3, shadowEnabled: true, shadow: "#000000", shadowDirection: 0, shadowDistance: 0, shadowBlur: 7, scale: 1.2, paddingLeft: 40, paddingRight: 40 },
+      { id: "nfs", name: "nfs", width: 1080, height: 1920, x: 0, y: 312, font: "Montserrat-Black", weight: 900, fontSize: 57, primary: "#ffffff", accent: "#55afdf", stroke: "#000000", strokeWidth: 3, shadowEnabled: true, shadow: "#000000", shadowDirection: 0, shadowDistance: 0, shadowBlur: 7, scale: 1.2, paddingLeft: 40, paddingRight: 40 },
+      { id: "myimp", name: "myimp", width: 1080, height: 1920, x: 0, y: 312, font: "Montserrat-Black", weight: 900, fontSize: 57, primary: "#ffffff", accent: "#88fe84", stroke: "#000000", strokeWidth: 3, shadowEnabled: true, shadow: "#000000", shadowDirection: 0, shadowDistance: 0, shadowBlur: 7, scale: 1.2, paddingLeft: 40, paddingRight: 40 },
+      { id: "demo", name: "demo", width: 1080, height: 1920, x: 0, y: 0, font: "Montserrat-Black", weight: 900, fontSize: 80, primary: "#e76161", accent: "#00cbd9", stroke: "#000000", strokeWidth: 6, shadowEnabled: true, shadow: "#000000", shadowDirection: 0, shadowDistance: 0, shadowBlur: 7, scale: 1.2, paddingLeft: 40, paddingRight: 40 },
+      { id: "esrarengizbiolay", name: "esrarengizbiolay", width: 1080, height: 1920, x: 0, y: 350, font: "ZillaSlab-Regular", weight: 400, fontSize: 84, primary: "#ffffff", accent: "#e4ce9f", stroke: "#000000", strokeOpacity: 50, strokeWidth: 3, box: "#e7e7e7", boxOpacity: 77, boxPadding: 90, shadowEnabled: true, shadow: "#000000", shadowOpacity: 70, shadowDirection: 540, shadowDistance: 18, shadowBlur: 90, scale: 1, paddingLeft: 96, paddingRight: 96, watermarkEnabled: true },
+      { id: "esrarengiz", name: "esrarengiz", width: 1080, height: 1920, x: 0, y: 400, font: "ZillaSlab-Regular", weight: 400, fontSize: 84, primary: "#ffffff", accent: "#e4ce9f", stroke: "#000000", strokeOpacity: 50, strokeWidth: 3, box: "#e7e7e7", boxOpacity: 77, boxPadding: 90, shadowEnabled: true, shadow: "#000000", shadowOpacity: 70, shadowDirection: 540, shadowDistance: 18, shadowBlur: 90, scale: 1, paddingLeft: 96, paddingRight: 96 },
+      { id: "monarch", name: "MONARCH", width: 1080, height: 1920, x: 0, y: 312, font: "Arboria-Bold", weight: 700, fontSize: 84, primary: "#ffffff", accent: "#f5b834", stroke: "#000000", strokeOpacity: 50, strokeWidth: 3, box: "#e7e7e7", boxOpacity: 77, boxPadding: 90, shadowEnabled: true, shadow: "#000000", shadowOpacity: 70, shadowDirection: 540, shadowDistance: 18, shadowBlur: 90, scale: 1, paddingLeft: 96, paddingRight: 96 },
+      { id: "camlicas", name: "çamlicas", width: 1080, height: 1920, x: 0, y: 312, font: "Unbounded-Medium", weight: 500, fontSize: 50, primary: "#454545", accent: "#ffffff", stroke: "#000000", strokeWidth: 0, boxEnabled: true, box: "#95c125", boxOpacity: 100, boxPadding: 15, boxBorderRadius: 6, shadowEnabled: false, shadow: "#000000", shadowDirection: 0, shadowDistance: 0, shadowBlur: 51, pastTextEnabled: true, pastTextColor: "#ffffff", scale: 1, paddingLeft: 96, paddingRight: 96 },
+      { id: "oslodent", name: "oslodent", width: 1080, height: 1920, x: 0, y: 312, font: "Montserrat-Black", weight: 900, fontSize: 84, primary: "#ffffff", accent: "#34e5f5", stroke: "#000000", strokeOpacity: 50, strokeWidth: 2, box: "#e7e7e7", boxOpacity: 77, boxPadding: 90, shadowEnabled: true, shadow: "#000000", shadowOpacity: 70, shadowDirection: 540, shadowDistance: 18, shadowBlur: 90, scale: 0.8, paddingLeft: 96, paddingRight: 96 },
+      { id: "esrarengizbiolay-new", name: "Esrarengizbiolay", width: 720, height: 1280, x: 0, y: 208, font: "ZillaSlab-Regular", weight: 400, fontSize: 56, primary: "#ffffff", accent: "#e4ce9f", stroke: "#000000", strokeOpacity: 50, strokeWidth: 2, box: "#e7e7e7", boxOpacity: 77, boxPadding: 60, boxBorderRadius: 60, shadowEnabled: true, shadow: "#000000", shadowOpacity: 70, shadowDirection: 360, shadowDistance: 12, shadowBlur: 60, scale: 1, paddingLeft: 64, paddingRight: 64, watermarkEnabled: true }
+    ].map(importedCutbackPreset).map(function (preset, index) {
       preset.mogrtStyle = preset.name;
       preset.isCaptioneer = false;
-      preset.badge = "Özel";
+      preset.badge = "Cutback";
       preset.order = index;
       return preset;
     });
@@ -3470,24 +3962,32 @@
       stroke = 0;
     }
     var strokeColor = preset.strokeColor || "#000000";
-    var shadowLift = Math.max(1, Math.round(2 * previewScale));
-    var shadowDrop = Math.max(1, Math.round(5 * previewScale));
-    var shadowBlur = Math.max(2, Math.round(12 * previewScale));
+    var shadowAngle = Number(preset.shadowDirection == null ? 135 : preset.shadowDirection) * Math.PI / 180;
+    var shadowDistance = Math.max(0, Number(preset.shadowDistance == null ? 4 : preset.shadowDistance) * previewScale);
+    var shadowX = Math.round(Math.cos(shadowAngle) * shadowDistance);
+    var shadowY = Math.round(Math.sin(shadowAngle) * shadowDistance);
+    var shadowBlur = Math.max(0, Number(preset.shadowBlur == null ? 2 : preset.shadowBlur) * previewScale);
+    var shadowColor = hexToRgba(
+      preset.shadowColor || "#000000",
+      Math.max(0, Math.min(100, Number(preset.shadowOpacity == null ? 65 : preset.shadowOpacity))) / 100
+    );
     var shadow = preset.shadowEnabled === false
       ? "none"
       : compact
-        ? "0 1px 2px rgba(0,0,0,.65)"
-        : "0 " + shadowLift + "px 0 " + strokeColor + ",0 " + shadowDrop + "px " + shadowBlur + "px rgba(0,0,0,.62)";
+        ? "0 1px 2px " + shadowColor
+        : shadowX + "px " + shadowY + "px " + shadowBlur + "px " + shadowColor;
     var transform = preset.animation === "pop" ? "scale(1.04)" : "none";
-    var boxPadY = Math.max(2, Math.round(4 * previewScale));
-    var boxPadX = Math.max(4, Math.round(9 * previewScale));
+    var boxPadding = Math.max(0, Number(preset.boxPadding == null ? 8 : preset.boxPadding) * previewScale);
     var box = preset.boxEnabled
       ? "background:" +
-        (preset.boxColor || "#ffffff") +
-        ";border-radius:8px;padding:" +
-        boxPadY +
-        "px " +
-        boxPadX +
+        hexToRgba(
+          preset.boxColor || "#000000",
+          Math.max(0, Math.min(100, Number(preset.boxOpacity == null ? 80 : preset.boxOpacity))) / 100
+        ) +
+        ";border-radius:" +
+        Math.max(0, Number(preset.boxBorderRadius == null ? 8 : preset.boxBorderRadius) * previewScale) +
+        "px;padding:" +
+        boxPadding +
         "px;box-decoration-break:clone;-webkit-box-decoration-break:clone;"
       : "";
     return (
@@ -3495,7 +3995,15 @@
       cssString(preset.fontFamily || "Inter") +
       ";font-size:" +
       size +
-      "px;font-weight:900;line-height:1.05;color:" +
+      "px;font-weight:" +
+      Number(preset.fontWeight || 900) +
+      ";font-style:" +
+      (preset.italicEnabled ? "italic" : "normal") +
+      ";text-decoration:" +
+      (preset.underlineEnabled ? "underline" : "none") +
+      ";letter-spacing:" +
+      Number(preset.letterSpacing || 0) * previewScale +
+      "px;line-height:1.05;color:" +
       (preset.primaryColor || "#ffffff") +
       ";-webkit-text-stroke:" +
       stroke +
@@ -3617,6 +4125,19 @@
       return { code: "en", label: "İngilizce", confidence: 0.82 };
     }
     return { code: "tr", label: "Türkçe", confidence: 0.78 };
+  }
+
+  function resolveTranscriptionLanguage() {
+    var selected = els.languageMode && els.languageMode.value ? els.languageMode.value : "auto";
+    if (selected !== "auto") {
+      return selected;
+    }
+    // Cutback sends an explicit base language. Short Turkish clips are often
+    // misdetected when each clip asks the model to guess independently.
+    if (state.scenario && (state.scenario.sourceLang === "tr" || state.scenario.sourceLang === "en")) {
+      return state.scenario.sourceLang;
+    }
+    return "auto";
   }
 
   function findLanguage(code) {
@@ -3771,6 +4292,19 @@
     return "id-" + Date.now() + "-" + Math.round(Math.random() * 1000000);
   }
 
+  function hexToRgba(value, opacity) {
+    var hex = String(value || "#000000").replace("#", "");
+    if (hex.length === 3) {
+      hex = hex.charAt(0) + hex.charAt(0) + hex.charAt(1) + hex.charAt(1) + hex.charAt(2) + hex.charAt(2);
+    }
+    var number = parseInt(hex, 16);
+    if (!Number.isFinite(number)) {
+      number = 0;
+    }
+    var alpha = Math.max(0, Math.min(1, Number(opacity == null ? 1 : opacity)));
+    return "rgba(" + ((number >> 16) & 255) + "," + ((number >> 8) & 255) + "," + (number & 255) + "," + alpha + ")";
+  }
+
   function escapeHtml(value) {
     return String(value)
       .replace(/&/g, "&amp;")
@@ -3785,5 +4319,17 @@
 
   function writeLog(message) {
     els.logOutput.textContent = message;
+    if (!els.outputPane) {
+      return;
+    }
+    els.outputPane.classList.add("is-visible");
+    if (state.logTimer) {
+      window.clearTimeout(state.logTimer);
+    }
+    state.logTimer = window.setTimeout(function () {
+      if (els.outputPane) {
+        els.outputPane.classList.remove("is-visible");
+      }
+    }, /hata|başarısız|bulunamadı|okunamadı/i.test(String(message || "")) ? 8000 : 4500);
   }
 })();

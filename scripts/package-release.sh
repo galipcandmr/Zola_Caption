@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VERSION="${1:-0.5.35}"
+VERSION="${1:-$(sed -nE 's/.*CURRENT_VERSION = "v([0-9.]+)".*/\1/p' "$ROOT/outputs/capiton-premiere-cep-plugin/src/cep-app.js" | head -1)}"
 # --slim ayrica bin/ (whisper-cli, ffmpeg) ve models/ (ggml-small.bin) haric
 # tutar: bu binary'ler surumler arasi neredeyse hic degismiyor, her seferinde
 # ~450MB'lik bu dosyalari yeniden paketlemek otomatik guncellemeleri

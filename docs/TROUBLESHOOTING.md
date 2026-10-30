@@ -21,7 +21,7 @@ defaults read com.adobe.CSXS.13 PlayerDebugMode
 Gerekirse installer'i tekrar calistir:
 
 ```bash
-bash "dist/Zola-Caption-v0.5.35/Zola Caption Installer.command"
+bash "dist/Zola-Caption-v1.1.1/Zola Caption Installer.command"
 ```
 
 Premiere'i kapatip ac.

@@ -6,6 +6,7 @@ outputs/capiton-local-engine/.env
 *.env
 
 # Runtime scratch/output
+work/
 outputs/capiton-local-engine/work/
 outputs/capiton-local-engine/*.log
 outputs/capiton-local-engine/.env.example.swp

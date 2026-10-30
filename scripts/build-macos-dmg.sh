@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VERSION="${1:-0.5.35}"
+VERSION="${1:-$(sed -nE 's/.*CURRENT_VERSION = "v([0-9.]+)".*/\1/p' "$ROOT/outputs/capiton-premiere-cep-plugin/src/cep-app.js" | head -1)}"
 DIST="$ROOT/dist"
 PACKAGE_DIR="$DIST/Zola-Caption-v$VERSION"
 DMG_ROOT="$DIST/Zola-Caption-DMG-v$VERSION"

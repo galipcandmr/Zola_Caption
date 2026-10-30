@@ -32,7 +32,7 @@ Simdiki uygulama bu senaryolardan en kritik olanlarini kapsar: timeline sesinden
 
 ## Mevcut Durum
 
-Guncel surum: `v0.5.35`
+Guncel surum: `v1.1.1`
 
 Calisan ana parcalar:
 

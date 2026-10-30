@@ -4,7 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Zola Caption</title>
-    <link rel="stylesheet" href="./styles.css?v=1.1.1">
+    <link rel="icon" type="image/png" href="./assets/brand/zolalogo.png">
+    <link rel="stylesheet" href="./styles.css?v=1.1.8">
   </head>
   <body>
     <div class="app-shell">
@@ -12,7 +13,7 @@
         <div class="brand">
           <img src="./assets/brand/zolalogo.png" alt="Zoladijital" class="brand-logo">
           <div class="brand-copy">
-            <span>v1.1.1</span>
+            <span>v1.1.8</span>
           </div>
         </div>
 
@@ -115,7 +116,7 @@
         <section class="caption-workbench">
           <div class="caption-head">
             <div>
-              <h1 id="sequenceTitle">Altyazı düzenleme</h1>
+              <h1 id="sequenceTitle">Altyazılar</h1>
               <span id="captionMeta">0 blok</span>
             </div>
             <div class="caption-tools">
@@ -130,19 +131,18 @@
 
           <div class="edit-footer">
             <div class="footer-actions">
-              <button class="ghost" id="applyBtn" type="button">Düzenlemeyi güncelle</button>
-              <button class="primary" id="reapplyBtn" type="button">Yeniden üret ve bas</button>
+              <button class="ghost timeline-button" id="applyBtn" type="button"><span aria-hidden="true">⌁</span> Timeline</button>
             </div>
           </div>
         </section>
 
         <aside class="animated-drawer" id="animatedDrawer">
           <div class="drawer-head">
-            <h2>Animasyonlu altyazı</h2>
+            <h2>Altyazı görünümü</h2>
           </div>
 
           <div class="style-tabs" role="tablist">
-            <button class="style-tab active" type="button" data-style-tab="preset">Hazır stil</button>
+            <button class="style-tab active" type="button" data-style-tab="preset">Şablon</button>
             <button class="style-tab" type="button" data-style-tab="general">Genel</button>
             <button class="style-tab" type="button" data-style-tab="caption">Altyazı</button>
             <button class="style-tab" type="button" data-style-tab="style">Stil</button>
@@ -163,6 +163,10 @@
             </div>
             <div class="template-group-title">Hazır stiller <span id="presetCount">0</span></div>
             <div class="preset-list" id="presetList"></div>
+            <div class="template-actions">
+              <button class="ghost full" id="saveTemplateBtn" type="button">Yeni şablon olarak kaydet</button>
+              <button class="ghost full" id="updateTemplateBtn" type="button">Seçili şablonu güncelle</button>
+            </div>
           </section>
 
           <section class="style-panel-content" data-style-panel="general">
@@ -229,35 +233,88 @@
             </label>
             <label class="field-label">
               Yazı tipi
-              <select id="fontInput">
-                <option value="Inter">Fontlar yükleniyor…</option>
-              </select>
+              <div class="font-picker" id="fontPicker">
+                <button class="font-picker-trigger" id="fontPickerTrigger" type="button" aria-haspopup="listbox" aria-expanded="false">
+                  <span class="font-picker-value" id="fontPickerValue">Inter</span>
+                  <span class="font-picker-chevron" aria-hidden="true">⌄</span>
+                </button>
+                <div class="font-picker-popover" id="fontPickerPopover" hidden>
+                  <input id="fontSearchInput" type="search" placeholder="Yazı tipi ara…" autocomplete="off">
+                  <div class="font-option-list" id="fontOptionList" role="listbox" aria-label="Yüklü yazı tipleri"></div>
+                  <div class="font-picker-empty" id="fontPickerEmpty" hidden>Eşleşen yazı tipi bulunamadı.</div>
+                </div>
+                <input id="fontInput" type="hidden" value="Inter">
+              </div>
+              <span id="fontMeta" class="field-hint">Sistem fontları yükleniyor…</span>
               <span id="fontWarning" class="field-warning hidden-field"></span>
             </label>
             <div class="split-fields">
               <label>Yazı boyutu <input id="fontSizeInput" type="number" min="24" max="160" step="1" value="56"></label>
-              <label>Ana renk <input id="primaryColorInput" type="color" value="#ffffff"></label>
+              <label>
+                Kalınlık
+                <select id="fontWeightInput">
+                  <option value="400">Normal 400</option>
+                  <option value="500">Orta 500</option>
+                  <option value="600">Yarı kalın 600</option>
+                  <option value="700">Kalın 700</option>
+                  <option value="800">Ekstra kalın 800</option>
+                  <option value="900" selected>Siyah 900</option>
+                </select>
+              </label>
             </div>
             <div class="split-fields">
-              <label>Vurgu rengi <input id="accentColorInput" type="color" value="#fff200"></label>
-              <label>Kontur rengi <input id="strokeColorInput" type="color" value="#000000"></label>
+              <label class="toggle-row"><span>İtalik</span><input id="italicEnabledInput" type="checkbox"></label>
+              <label class="toggle-row"><span>Altı çizili</span><input id="underlineEnabledInput" type="checkbox"></label>
             </div>
-            <label class="field-label">
-              Kontur kalınlığı
-              <input id="strokeWidthInput" type="range" min="0" max="14" step="1" value="5">
+            <label class="toggle-row hidden-field" id="watermarkSettingsRow">
+              <span>@esrarengizbiolay watermark (%20)</span>
+              <input id="watermarkEnabledInput" type="checkbox" checked>
             </label>
+            <label class="field-label">
+              Harf aralığı
+              <input id="letterSpacingInput" type="range" min="-4" max="20" step="0.5" value="0">
+            </label>
+            <div class="split-fields">
+              <label>Ana renk <input id="primaryColorInput" type="color" value="#ffffff"></label>
+              <label>Vurgu rengi <input id="accentColorInput" type="color" value="#fff200"></label>
+            </div>
+            <div class="split-fields">
+              <label>Kontur rengi <input id="strokeColorInput" type="color" value="#000000"></label>
+              <label>Kontur kalınlığı <input id="strokeWidthInput" type="number" min="0" max="24" step="0.5" value="5"></label>
+            </div>
             <label class="toggle-row">
               <span>Kutu</span>
               <input id="boxEnabledInput" type="checkbox">
+            </label>
+            <div class="split-fields">
+              <label>Kutu rengi <input id="boxColorInput" type="color" value="#000000"></label>
+              <label>Kutu opaklığı <input id="boxOpacityInput" type="range" min="0" max="100" step="1" value="80"></label>
+            </div>
+            <label class="field-label">
+              Kutu boşluğu
+              <input id="boxPaddingInput" type="range" min="0" max="30" step="1" value="8">
             </label>
             <label class="toggle-row">
               <span>Gölge</span>
               <input id="shadowEnabledInput" type="checkbox" checked>
             </label>
+            <div class="split-fields">
+              <label>Gölge rengi <input id="shadowColorInput" type="color" value="#000000"></label>
+              <label>Gölge opaklığı <input id="shadowOpacityInput" type="range" min="0" max="100" step="1" value="65"></label>
+            </div>
+            <div class="split-fields">
+              <label>Mesafe <input id="shadowDistanceInput" type="number" min="0" max="40" step="1" value="4"></label>
+              <label>Bulanıklık <input id="shadowBlurInput" type="number" min="0" max="100" step="0.5" value="2"></label>
+            </div>
+            <label class="field-label">
+              Gölge yönü
+              <input id="shadowDirectionInput" type="range" min="0" max="360" step="5" value="135">
+            </label>
             <div class="drawer-preview style-live-preview" id="previewStage">
               <div class="caption-preview" id="captionPreviewCard">
                 <span id="previewPrimary">Altyazı önizlemesi</span>
                 <span id="previewSecondary">Altyazı önizlemesi</span>
+                <span id="previewWatermark">@esrarengizbiolay</span>
               </div>
               <video id="previewVideo" class="mogrt-preview-video" autoplay muted loop playsinline></video>
             </div>
@@ -287,8 +344,7 @@
           </section>
 
           <div class="drawer-actions">
-            <button class="ghost full" id="saveTemplateBtn" type="button">Yeni stil olarak kaydet</button>
-            <button class="ghost full" id="updateTemplateBtn" type="button">Seçili stili güncelle</button>
+            <button class="primary full" id="reapplyBtn" type="button">Zaman çizelgesine uygula</button>
           </div>
         </aside>
       </main>
@@ -321,7 +377,7 @@
           <div class="settings-grid">
             <div class="settings-row">
               <span>Sürüm</span>
-              <strong id="settingsVersion">v1.1.1</strong>
+              <strong id="settingsVersion">v1.1.8</strong>
               <small id="settingsVersionStatus">Yerel önizleme güncel.</small>
             </div>
             <div class="settings-row" id="settingsUpdateRow">
@@ -368,7 +424,7 @@
         </div>
       </section>
 
-      <section class="output-pane">
+      <section class="output-pane" aria-live="polite">
         <pre id="logOutput">Zola Caption hazır. Zaman çizelgesindeki sesler otomatik okunuyor.</pre>
       </section>
     </div>
@@ -380,7 +436,7 @@
       <option value="Landscape">16:9 Yatay</option>
     </select>
     <select id="mogrtStyleInput" class="hidden-field" aria-hidden="true"></select>
-    <script src="./src/update-config.js?v=1.1.1"></script>
-    <script src="./src/cep-app.js?v=1.1.1"></script>
+    <script src="./src/update-config.js?v=1.1.8"></script>
+    <script src="./src/cep-app.js?v=1.1.8"></script>
   </body>
 </html>

@@ -1,13 +1,13 @@
 {
-  "latest": "1.1.1",
+  "latest": "1.1.8",
   "minSupported": "0.5.30",
   "mandatory": false,
-  "downloadUrl": "https://github.com/galipcandmr/Zola_Caption/releases/download/v1.1.1/Zola-Caption-v1.1.1-update.zip",
+  "downloadUrl": "https://github.com/galipcandmr/Zola_Caption/releases/download/v1.1.8/Zola-Caption-v1.1.8-update.zip",
   "installMode": "engine",
   "notes": [
-    "Panel artık dar Premiere panel boyutlarında (420px ve altı) bozulmuyor; butonlar taşmak yerine kısaltılıyor.",
-    "Drawer-actions butonları küçük ekranda dikey sıralanıyor.",
-    "Topbar 640px altında version rozeti gizlenerek alan kazandırılıyor.",
-    "380px altında drawer gizlenip tüm alan altyazı listesine ayrılıyor."
+    "macOS korumalı klasörlerindeki videolar için Premiere izin köprüsü eklendi.",
+    "Arka plan motorunun okuyamadığı medya, Premiere'ın mevcut Tam Disk Erişimi kullanılarak güvenli çalışma klasörüne hazırlanıyor.",
+    "Kullanıcının ayrıca Node veya FFmpeg dosyasına Tam Disk Erişimi vermesi gerekmiyor.",
+    "FFmpeg 255 ve Video dosyasına okuma izni yok hatalarında transkripsiyon otomatik yeniden deneniyor."
   ]
 }

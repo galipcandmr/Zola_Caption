@@ -14,11 +14,15 @@ const PORT = Number(process.env.CAPITON_ENGINE_PORT || 17771);
 const WORK_DIR = path.join(ROOT, "work");
 const DEFAULT_MODEL = path.join(ROOT, "models", "ggml-small.bin");
 const ENV_PATH = path.join(ROOT, ".env");
+const MAX_JSON_BODY_BYTES = 5 * 1024 * 1024;
+const TRANSLATION_BATCH_MAX_ITEMS = 100;
+const TRANSLATION_BATCH_MAX_CHARACTERS = 20000;
 loadEnvFile(ENV_PATH);
 let GOOGLE_TRANSLATE_API_KEY =
   process.env.CAPITON_GOOGLE_TRANSLATE_API_KEY || process.env.GOOGLE_TRANSLATE_API_KEY || "";
 
 let updateJobState = { phase: "idle", message: "", code: null, updatedAt: 0 };
+let systemFontCache = { loadedAt: 0, result: null };
 
 function setUpdateJob(phase, message, code) {
   updateJobState = { phase, message, code: code || null, updatedAt: Date.now() };
@@ -27,7 +31,12 @@ function setUpdateJob(phase, message, code) {
 fs.mkdirSync(WORK_DIR, { recursive: true });
 
 const server = http.createServer(async (req, res) => {
-  setCors(res);
+  const originAllowed = setCors(req, res);
+
+  if (!originAllowed) {
+    sendJson(res, 403, { ok: false, code: "ORIGIN_NOT_ALLOWED", message: "İstek kaynağına izin verilmiyor." });
+    return;
+  }
 
   if (req.method === "OPTIONS") {
     res.writeHead(204);
@@ -43,10 +52,17 @@ const server = http.createServer(async (req, res) => {
         port: PORT,
         whisper: findWhisperCli(),
         ffmpeg: findExecutable([path.join(ROOT, "bin", "ffmpeg"), "ffmpeg", "/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"]),
+        workDir: WORK_DIR,
         modelExists: fs.existsSync(DEFAULT_MODEL),
         modelPath: DEFAULT_MODEL,
         googleTranslateConfigured: Boolean(GOOGLE_TRANSLATE_API_KEY)
       });
+      return;
+    }
+
+    if (req.method === "GET" && req.url === "/system-fonts") {
+      const result = await listSystemFonts();
+      sendJson(res, result.ok ? 200 : 500, result);
       return;
     }
 
@@ -67,6 +83,13 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && req.url === "/render-overlay") {
       const body = await readJson(req);
       const result = await renderOverlay(body);
+      sendJson(res, result.ok ? 200 : 422, result);
+      return;
+    }
+
+    if (req.method === "POST" && req.url === "/render-watermark") {
+      const body = await readJson(req);
+      const result = await renderWatermark(body);
       sendJson(res, result.ok ? 200 : 422, result);
       return;
     }
@@ -99,13 +122,19 @@ const server = http.createServer(async (req, res) => {
 
     sendJson(res, 404, { ok: false, message: "Endpoint bulunamadı." });
   } catch (error) {
-    sendJson(res, 500, { ok: false, message: error.message || String(error) });
+    sendJson(res, error.statusCode || 500, {
+      ok: false,
+      code: error.code || "ENGINE_ERROR",
+      message: error.message || String(error)
+    });
   }
 });
 
-server.listen(PORT, "127.0.0.1", () => {
-  console.log(`Zola Caption Local Engine listening on http://127.0.0.1:${PORT}`);
-});
+if (require.main === module) {
+  server.listen(PORT, "127.0.0.1", () => {
+    console.log(`Zola Caption Local Engine listening on http://127.0.0.1:${PORT}`);
+  });
+}
 
 function loadEnvFile(filePath) {
   if (!fs.existsSync(filePath)) {
@@ -193,6 +222,61 @@ function saveGoogleApiKey(body) {
 }
 
 async function transcribe(body) {
+  const clips = normalizeTranscriptionClips(body && body.clips);
+  if (!clips.length) {
+    return transcribeSingleMedia(body);
+  }
+
+  if (clips.length === 1) {
+    const singleResult = await transcribeSingleMedia({
+      ...body,
+      mediaPath: clips[0].mediaPath,
+      trimStartSeconds: clips[0].sourceInSeconds,
+      trimEndSeconds: clips[0].sourceOutSeconds
+    });
+    singleResult.sourceClipCount = singleResult.ok ? 1 : 0;
+    return singleResult;
+  }
+
+  const timelineStartSeconds = clips.reduce(
+    (minimum, clip) => Math.min(minimum, clip.timelineStartSeconds),
+    clips[0].timelineStartSeconds
+  );
+  const runs = [];
+  for (let index = 0; index < clips.length; index += 1) {
+    const clip = clips[index];
+    const result = await transcribeSingleMedia({
+      ...body,
+      clips: undefined,
+      mediaPath: clip.mediaPath,
+      trimStartSeconds: clip.sourceInSeconds,
+      trimEndSeconds: clip.sourceOutSeconds
+    });
+    if (!result.ok) {
+      return {
+        ...result,
+        code: result.code || "CLIP_TRANSCRIPTION_FAILED",
+        sourceClipCount: index,
+        failedClipIndex: clip.clipIndex,
+        message:
+          `${index + 1}/${clips.length} numaralı ses klibi okunamadı` +
+          (clip.clipName ? ` (${clip.clipName})` : "") +
+          `: ${result.message || "Bilinmeyen hata"}`
+      };
+    }
+    runs.push({ clip, result });
+  }
+
+  const merged = mergeTranscriptionResults(runs, timelineStartSeconds);
+  const jobId = `${Date.now()}-${Math.round(Math.random() * 1000000)}`;
+  const srtPath = path.join(WORK_DIR, `${jobId}-combined.srt`);
+  merged.srt = formatSrtCaptions(merged.captions);
+  fs.writeFileSync(srtPath, merged.srt, "utf8");
+  merged.files.srtPath = srtPath;
+  return merged;
+}
+
+async function transcribeSingleMedia(body) {
   const mediaPath = body && body.mediaPath;
   const language = normalizeLanguage((body && body.language) || "auto");
   const task = normalizeTask(body && body.task);
@@ -206,6 +290,16 @@ async function transcribe(body) {
 
   if (!mediaPath || !fs.existsSync(mediaPath)) {
     return { ok: false, code: "MEDIA_NOT_FOUND", message: `Medya dosyası bulunamadı: ${mediaPath || "-"}` };
+  }
+
+  try {
+    fs.accessSync(mediaPath, fs.constants.R_OK);
+  } catch (error) {
+    return {
+      ok: false,
+      code: "MEDIA_NOT_READABLE",
+      message: `Video dosyasına okuma izni yok. macOS Sistem Ayarları > Gizlilik ve Güvenlik > Dosyalar ve Klasörler bölümünden Zola/Premiere erişimini aç: ${mediaPath}`
+    };
   }
 
   if (!whisperCli) {
@@ -228,20 +322,26 @@ async function transcribe(body) {
   const jobId = `${Date.now()}-${Math.round(Math.random() * 1000000)}`;
   const audioPath = path.join(WORK_DIR, `${jobId}.wav`);
   const outBase = path.join(WORK_DIR, jobId);
+  const availableBytes = getAvailableDiskBytes(WORK_DIR);
+  if (availableBytes !== null && availableBytes < 300 * 1024 * 1024) {
+    return {
+      ok: false,
+      code: "INSUFFICIENT_DISK_SPACE",
+      message: "Altyazı üretmek için diskte en az 300 MB boş alan gerekiyor. Biraz yer açıp tekrar dene."
+    };
+  }
 
-  if (path.extname(mediaPath).toLowerCase() === ".wav" && trimStartSeconds === 0 && trimDurationSeconds === 0) {
+  if (!ffmpeg && path.extname(mediaPath).toLowerCase() === ".wav" && trimStartSeconds === 0 && trimDurationSeconds === 0) {
     fs.copyFileSync(mediaPath, audioPath);
   } else {
     if (ffmpeg) {
-      const ffmpegArgs = ["-y", "-i", mediaPath];
-      if (trimStartSeconds > 0) {
-        ffmpegArgs.push("-ss", String(trimStartSeconds));
+      try {
+        await extractAudioWithFallback(ffmpeg, mediaPath, trimStartSeconds, trimDurationSeconds, audioPath);
+      } catch (error) {
+        const message = describeFfmpegFailure(error, mediaPath);
+        writeLastFfmpegError(error, mediaPath);
+        return { ok: false, code: "FFMPEG_AUDIO_EXTRACTION_FAILED", message };
       }
-      if (trimDurationSeconds > 0) {
-        ffmpegArgs.push("-t", String(trimDurationSeconds));
-      }
-      ffmpegArgs.push("-vn", "-ac", "1", "-ar", "16000", audioPath);
-      await run(ffmpeg, ffmpegArgs);
     } else if (afconvert) {
       if (trimStartSeconds > 0 || trimDurationSeconds > 0) {
         return {
@@ -276,7 +376,16 @@ async function transcribe(body) {
     "-bs",
     "8",
     "-ml",
-    "56"
+    "56",
+    "-t",
+    String(Math.max(2, Math.min(8, os.cpus().length - 1))),
+    "-sns",
+    "-nth",
+    "0.50",
+    "-et",
+    "2.20",
+    "-lpt",
+    "-0.80"
   ];
   args.push("-l", language);
   if (task === "translate") {
@@ -284,7 +393,7 @@ async function transcribe(body) {
   }
   const prompt = initialPrompt(language, task);
   if (prompt) {
-    args.push("--prompt", prompt);
+    args.push("--prompt", prompt, "--carry-initial-prompt");
   }
   await run(whisperCli, args);
 
@@ -302,6 +411,9 @@ async function transcribe(body) {
   const whisperJson = fs.existsSync(jsonPath) ? JSON.parse(fs.readFileSync(jsonPath, "utf8")) : null;
   const words = whisperJson ? parseWhisperWords(whisperJson) : [];
   const detectedLanguage = parseWhisperLanguage(whisperJson) || (language === "auto" ? "" : language);
+  const captions = normalizeTranscribedCaptions(parseSrt(srt), detectedLanguage || language);
+  const normalizedSrt = formatSrtCaptions(captions);
+  fs.writeFileSync(srtPath, normalizedSrt, "utf8");
   return {
     ok: true,
     language,
@@ -310,8 +422,8 @@ async function transcribe(body) {
     outputLanguage: task === "translate" ? "en" : "source",
     trimStartSeconds,
     trimEndSeconds,
-    srt,
-    captions: parseSrt(srt),
+    srt: normalizedSrt,
+    captions,
     words,
     files: {
       audioPath,
@@ -319,6 +431,138 @@ async function transcribe(body) {
       jsonPath: fs.existsSync(jsonPath) ? jsonPath : ""
     }
   };
+}
+
+function normalizeTranscriptionClips(clips) {
+  if (!Array.isArray(clips)) {
+    return [];
+  }
+  return clips
+    .map((clip, index) => ({
+      clipIndex: Number.isFinite(Number(clip && clip.clipIndex)) ? Number(clip.clipIndex) : index,
+      clipName: String((clip && clip.clipName) || ""),
+      mediaPath: String((clip && clip.mediaPath) || ""),
+      timelineStartSeconds: safeSeconds(clip && clip.timelineStartSeconds),
+      timelineEndSeconds: safeSeconds(clip && clip.timelineEndSeconds),
+      sourceInSeconds: safeSeconds(clip && clip.sourceInSeconds),
+      sourceOutSeconds: safeSeconds(clip && clip.sourceOutSeconds)
+    }))
+    .filter((clip) => clip.mediaPath && clip.timelineEndSeconds > clip.timelineStartSeconds)
+    .sort((left, right) => left.timelineStartSeconds - right.timelineStartSeconds);
+}
+
+function mergeTranscriptionResults(runs, timelineStartSeconds) {
+  const captions = [];
+  const words = [];
+  const clipFiles = [];
+  let detectedLanguage = "";
+
+  for (const run of runs) {
+    const offset = Math.max(0, run.clip.timelineStartSeconds - timelineStartSeconds);
+    for (const caption of run.result.captions || []) {
+      captions.push({
+        ...caption,
+        start: safeSeconds(caption.start) + offset,
+        end: safeSeconds(caption.end) + offset
+      });
+    }
+    for (const word of run.result.words || []) {
+      words.push({
+        ...word,
+        start: safeSeconds(word.start) + offset,
+        end: safeSeconds(word.end) + offset
+      });
+    }
+    clipFiles.push(run.result.files || {});
+    detectedLanguage = detectedLanguage || run.result.detectedLanguage || "";
+  }
+
+  captions.sort((left, right) => left.start - right.start || left.end - right.end);
+  words.sort((left, right) => left.start - right.start || left.end - right.end);
+  const firstResult = runs[0] && runs[0].result ? runs[0].result : {};
+  return {
+    ok: true,
+    language: firstResult.language || "auto",
+    detectedLanguage,
+    task: firstResult.task || "transcribe",
+    outputLanguage: firstResult.outputLanguage || "source",
+    trimStartSeconds: 0,
+    trimEndSeconds: maxCaptionEnd(captions),
+    captions,
+    words,
+    sourceClipCount: runs.length,
+    files: { srtPath: "", jsonPath: "", audioPath: "", clipFiles }
+  };
+}
+
+function formatSrtCaptions(captions) {
+  return (captions || [])
+    .map(
+      (caption, index) =>
+        `${index + 1}\n${formatSrtTime(caption.start)} --> ${formatSrtTime(caption.end)}\n${String(caption.text || "").trim()}`
+    )
+    .join("\n\n")
+    .concat(captions && captions.length ? "\n" : "");
+}
+
+function normalizeTranscribedCaptions(captions, language) {
+  let capitalizeNext = true;
+  return (captions || []).map((caption) => {
+    let text = normalizeTranscriptText(caption.text, language);
+    if (language === "tr" && capitalizeNext) {
+      text = text.replace(/^([a-zçğıöşü])/, (letter) => letter.toLocaleUpperCase("tr-TR"));
+    }
+    capitalizeNext = /[.!?][\"'”’)]?$/.test(text);
+    return { ...caption, text };
+  });
+}
+
+function normalizeTranscriptText(value, language) {
+  let text = String(value || "")
+    .replace(/\s+/g, " ")
+    .replace(/\s+([,.;:!?])/g, "$1")
+    .replace(/([,.;:!?])(?=[^\s,.;:!?])/g, "$1 ")
+    .trim();
+  if (!text || language !== "tr") {
+    return text;
+  }
+
+  const canonicalTerms = [
+    [/\bpremiere\s+pro\b/gi, "Premiere Pro"],
+    [/\bcutback\b/gi, "Cutback"],
+    [/\bzola\b/gi, "Zola"],
+    [/\bre\s*\/\s*max\b/gi, "RE/MAX"],
+    [/\boslo\s*dent\b/gi, "OsloDent"],
+    [/\bmonarch\b/gi, "MONARCH"],
+    [/\besrarengiz\s+bir\s+olay\b/gi, "Esrarengiz Bir Olay"],
+    [/\bmahmara\b/gi, "Marmara"],
+    [/\bdeprimi\b/gi, "depremi"],
+    [/\bulu\s+camii?\b/gi, "Ulu Cami"]
+  ];
+  canonicalTerms.forEach(([pattern, replacement]) => {
+    text = text.replace(pattern, replacement);
+  });
+
+  return text.replace(/([.!?]\s+)([a-zçğıöşü])/g, (match, prefix, letter) =>
+    prefix + letter.toLocaleUpperCase("tr-TR")
+  );
+}
+
+function formatSrtTime(value) {
+  const totalMilliseconds = Math.max(0, Math.round(safeSeconds(value) * 1000));
+  const hours = Math.floor(totalMilliseconds / 3600000);
+  const minutes = Math.floor((totalMilliseconds % 3600000) / 60000);
+  const seconds = Math.floor((totalMilliseconds % 60000) / 1000);
+  const milliseconds = totalMilliseconds % 1000;
+  return (
+    String(hours).padStart(2, "0") +
+    ":" +
+    String(minutes).padStart(2, "0") +
+    ":" +
+    String(seconds).padStart(2, "0") +
+    "," +
+    String(milliseconds).padStart(3, "0")
+  );
 }
 
 async function translateTextCaptions(body) {
@@ -396,7 +640,43 @@ async function translateTextCaptions(body) {
   };
 }
 
-function translateWithGoogleCloud(texts, sourceLanguage, targetLanguage) {
+async function translateWithGoogleCloud(texts, sourceLanguage, targetLanguage) {
+  const batches = chunkTranslationTexts(texts);
+  const translated = [];
+  for (const batch of batches) {
+    const batchResult = await translateBatchWithGoogleCloud(batch, sourceLanguage, targetLanguage);
+    translated.push(...batchResult);
+  }
+  return translated;
+}
+
+function chunkTranslationTexts(texts, maxItems, maxCharacters) {
+  const itemLimit = Math.max(1, Number(maxItems) || TRANSLATION_BATCH_MAX_ITEMS);
+  const characterLimit = Math.max(1, Number(maxCharacters) || TRANSLATION_BATCH_MAX_CHARACTERS);
+  const batches = [];
+  let current = [];
+  let currentCharacters = 0;
+
+  for (const value of texts || []) {
+    const text = String(value || "");
+    const wouldOverflowItems = current.length >= itemLimit;
+    const wouldOverflowCharacters = current.length > 0 && currentCharacters + text.length > characterLimit;
+    if (wouldOverflowItems || wouldOverflowCharacters) {
+      batches.push(current);
+      current = [];
+      currentCharacters = 0;
+    }
+    current.push(text);
+    currentCharacters += text.length;
+  }
+
+  if (current.length) {
+    batches.push(current);
+  }
+  return batches;
+}
+
+function translateBatchWithGoogleCloud(texts, sourceLanguage, targetLanguage) {
   const target = googleLanguageCode(targetLanguage);
   const source = sourceLanguage && sourceLanguage !== "auto" ? googleLanguageCode(sourceLanguage) : "auto";
   const payload = {
@@ -968,6 +1248,7 @@ async function renderOverlay(body) {
   const preset = (body && body.preset) || {};
   const width = safeDimension(body && body.width, 1080);
   const height = safeDimension(body && body.height, 1920);
+  const renderSize = resolveOverlayRenderSize(width, height);
   const duration = Math.max(1, safeSeconds(body && body.durationSeconds) || maxCaptionEnd(captions) + 0.5);
   const jobId = `${Date.now()}-${Math.round(Math.random() * 1000000)}`;
   const assPath = path.join(WORK_DIR, `${jobId}.ass`);
@@ -975,30 +1256,23 @@ async function renderOverlay(body) {
   const overlayPath = requestedOverlayPath || path.join(WORK_DIR, `${jobId}-capiton-overlay.mov`);
   const renderPath = requestedOverlayPath ? path.join(WORK_DIR, `${jobId}-capiton-overlay-tmp.mov`) : overlayPath;
 
-  fs.writeFileSync(assPath, buildAss(captions, preset, width, height), "utf8");
-  const keyColor = "0x123456";
+  fs.writeFileSync(assPath, buildAss(captions, preset, renderSize.width, renderSize.height), "utf8");
 
   await run(ffmpeg, [
     "-y",
     "-f",
     "lavfi",
     "-i",
-    `color=c=${keyColor}:s=${width}x${height}:d=${duration}:r=30`,
+    `color=c=black@0.0:s=${renderSize.width}x${renderSize.height}:d=${duration}:r=30,format=rgba`,
     "-r",
     "30",
     "-vf",
-    `ass=${escapeFfmpegFilterPath(assPath)},colorkey=${keyColor}:0.08:0.0,format=yuva444p10le`,
+    buildOverlayFilterGraph(assPath, width, height, renderSize),
     "-an",
     "-c:v",
-    "prores_ks",
-    "-profile:v",
-    "4444",
-    "-alpha_bits",
-    "16",
-    "-vendor",
-    "apl0",
+    "qtrle",
     "-pix_fmt",
-    "yuva444p10le",
+    "argb",
     "-metadata:s:v:0",
     "alpha_mode=straight",
     "-movflags",
@@ -1015,11 +1289,80 @@ async function renderOverlay(body) {
     overlayPath,
     assPath,
     durationSeconds: duration,
+    width,
+    height,
+    renderWidth: renderSize.width,
+    renderHeight: renderSize.height,
+    supersampleFactor: renderSize.factor,
     updatedExisting: !!requestedOverlayPath,
     message: requestedOverlayPath
       ? `Mevcut caption overlay güncellendi: ${overlayPath}`
       : `Stilli caption overlay üretildi: ${overlayPath}`
   };
+}
+
+async function renderWatermark(body) {
+  const ffmpeg = findExecutable([path.join(ROOT, "bin", "ffmpeg"), "ffmpeg", "/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"]);
+  if (!ffmpeg) {
+    return { ok: false, code: "FFMPEG_NOT_FOUND", message: "Watermark üretmek için ffmpeg gerekli." };
+  }
+
+  const preset = (body && body.preset) || {};
+  const width = safeDimension(body && body.width, 1080);
+  const height = safeDimension(body && body.height, 1920);
+  const jobId = `${Date.now()}-${Math.round(Math.random() * 1000000)}`;
+  const assPath = path.join(WORK_DIR, `${jobId}-esrarengiz-watermark.ass`);
+  const watermarkPath = path.join(WORK_DIR, `${jobId}-esrarengiz-watermark.png`);
+  fs.writeFileSync(assPath, buildWatermarkAss(preset, width, height), "utf8");
+
+  await run(ffmpeg, [
+    "-y",
+    "-f",
+    "lavfi",
+    "-i",
+    `color=c=black@0.0:s=${width}x${height}:d=0.04:r=1,format=rgba`,
+    "-vf",
+    buildOverlayFilterGraph(assPath, width, height, { width, height, factor: 1 }),
+    "-frames:v",
+    "1",
+    "-c:v",
+    "png",
+    watermarkPath
+  ]);
+
+  return {
+    ok: true,
+    watermarkPath,
+    assPath,
+    width,
+    height,
+    opacity: 20,
+    message: "@esrarengizbiolay watermark katmanı üretildi."
+  };
+}
+
+function resolveOverlayRenderSize(width, height) {
+  const targetWidth = safeDimension(width, 1080);
+  const targetHeight = safeDimension(height, 1920);
+  const factor = targetWidth < 1080 || targetHeight < 1920 ? 2 : 1;
+  return {
+    width: Math.min(8192, targetWidth * factor),
+    height: Math.min(8192, targetHeight * factor),
+    factor
+  };
+}
+
+function buildOverlayFilterGraph(assPath, targetWidth, targetHeight, renderSize) {
+  const bundledFonts = path.join(ROOT, "fonts");
+  const fontOption = fs.existsSync(bundledFonts)
+    ? `:fontsdir=${escapeFfmpegFilterPath(bundledFonts)}`
+    : "";
+  const filters = [`ass=${escapeFfmpegFilterPath(assPath)}${fontOption}:alpha=1`];
+  if (renderSize.width !== targetWidth || renderSize.height !== targetHeight) {
+    filters.push(`scale=${targetWidth}:${targetHeight}:flags=lanczos+accurate_rnd`);
+  }
+  filters.push("format=argb");
+  return filters.join(",");
 }
 
 function resolveOverlayOutputPath(value) {
@@ -1048,7 +1391,7 @@ function initialPrompt(language, task) {
     return "Translate the speech into clear, natural English subtitles. Preserve names and meaning.";
   }
   if (language === "tr") {
-    return "Bu bir Türkçe röportaj konuşmasıdır. İsimleri, ekleri ve doğal Türkçe cümleleri doğru yaz.";
+    return "Türkçe konuşma dökümü. Türkçe karakterler: ç, ğ, ı, İ, ö, ş, ü. Özel adlar: Zola, Premiere Pro, Cutback, Esrarengiz Bir Olay, MONARCH, RE/MAX, OsloDent, Bursa, Marmara Depremi, Ulu Cami.";
   }
   if (language === "en") {
     return "This is an English interview transcript. Preserve names and natural punctuation.";
@@ -1083,17 +1426,30 @@ function buildAss(captions, preset, width, height) {
   }
 
   const primary = assColor(preset.primaryColor || "#ffffff", "00");
-  const outline = assColor(preset.strokeColor || "#000000", "00");
+  const outline = preset.boxEnabled
+    ? assColor(preset.boxColor || "#000000", assAlphaFromOpacity(preset.boxOpacity, 80))
+    : assColor(preset.strokeColor || "#000000", assAlphaFromOpacity(preset.strokeOpacity, 100));
   const back = preset.boxEnabled
-    ? assColor(preset.boxColor || "#000000", "00")
-    : assColor(preset.shadowColor || "#000000", preset.shadowEnabled === false ? "FF" : "50");
-  const font = sanitizeAssText(preset.fontFamily || "Arial");
+    ? assColor(preset.boxColor || "#000000", assAlphaFromOpacity(preset.boxOpacity, 80))
+    : assColor(
+        preset.shadowColor || "#000000",
+        preset.shadowEnabled === false ? "FF" : assAlphaFromOpacity(preset.shadowOpacity, 65)
+      );
+  const resolvedFont = resolveAssFontStyle(preset.fontFamily || "Arial", preset.fontWeight, preset.italicEnabled);
+  const font = sanitizeAssText(resolvedFont.family);
   const scale = clampNumber(preset.scale, 1, 0.4, 3);
-  const fontSize = Math.round(Number(preset.fontSize || Math.max(42, height * 0.052)) * scale);
-  const outlineWidth = Number(preset.strokeWidth || 5);
+  const dimensionScale = captionDimensionScale(width, height, preset);
+  const fontSize = Math.round(Number(preset.fontSize || 56) * scale * dimensionScale);
+  const outlineWidth = preset.boxEnabled
+    ? clampNumber(preset.boxPadding, 8, 0, 30) * dimensionScale
+    : clampNumber(preset.strokeWidth, 5, 0, 24) * dimensionScale;
+  const letterSpacing = clampNumber(preset.letterSpacing, 0, -4, 20) * dimensionScale;
   const marginV = Math.round(height * 0.13);
   const borderStyle = preset.boxEnabled ? 3 : 1;
-  const shadowSize = preset.shadowEnabled === false ? 0 : 2;
+  const shadowSize = preset.shadowEnabled === false ? 0 : clampNumber(preset.shadowDistance, 4, 0, 40) * dimensionScale;
+  const bold = resolvedFont.bold;
+  const italic = resolvedFont.italic;
+  const underline = preset.underlineEnabled ? 1 : 0;
   const dialogueTag = captionDialogueTag(preset, width, height);
 
   const lines = [
@@ -1106,7 +1462,7 @@ function buildAss(captions, preset, width, height) {
     "",
     "[V4+ Styles]",
     "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-    `Style: Capiton,${font},${fontSize},${primary},${primary},${outline},${back},1,0,0,0,100,100,0,0,${borderStyle},${outlineWidth},${shadowSize},2,80,80,${marginV},1`,
+    `Style: Capiton,${font},${fontSize},${primary},${primary},${outline},${back},${bold},${italic},${underline},0,100,100,${letterSpacing},0,${borderStyle},${outlineWidth},${shadowSize},2,80,80,${marginV},1`,
     "",
     "[Events]",
     "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"
@@ -1127,20 +1483,33 @@ function buildAss(captions, preset, width, height) {
 
 function buildKaraokeAss(captions, preset, width, height) {
   const primary = assColor(preset.primaryColor || "#ffffff", "00");
-  const outline = assColor(preset.strokeColor || "#000000", "00");
+  const outline = preset.boxEnabled
+    ? assColor(preset.boxColor || "#000000", assAlphaFromOpacity(preset.boxOpacity, 80))
+    : assColor(preset.strokeColor || "#000000", assAlphaFromOpacity(preset.strokeOpacity, 100));
   const back = preset.boxEnabled
-    ? assColor(preset.boxColor || "#000000", "00")
-    : assColor(preset.shadowColor || "#000000", preset.shadowEnabled === false ? "FF" : "50");
+    ? assColor(preset.boxColor || "#000000", assAlphaFromOpacity(preset.boxOpacity, 80))
+    : assColor(
+        preset.shadowColor || "#000000",
+        preset.shadowEnabled === false ? "FF" : assAlphaFromOpacity(preset.shadowOpacity, 65)
+      );
   const active = assInlineColor(readableActiveColor(preset.accentColor, preset.primaryColor));
   const normal = assInlineColor(preset.primaryColor || "#ffffff");
-  const font = sanitizeAssText(preset.fontFamily || "Arial");
+  const past = assInlineColor(preset.pastTextColor || preset.primaryColor || "#ffffff");
+  const resolvedFont = resolveAssFontStyle(preset.fontFamily || "Arial", preset.fontWeight, preset.italicEnabled);
+  const font = sanitizeAssText(resolvedFont.family);
   const scale = clampNumber(preset.scale, 1, 0.4, 3);
-  const fontSize = Math.round(Number(preset.fontSize || Math.max(42, height * 0.052)) * scale);
-  const outlineWidth = clampNumber(preset.strokeWidth, 6, 0, 18);
-  const letterSpacing = clampNumber(preset.letterSpacing, 1, 0, 12);
+  const dimensionScale = captionDimensionScale(width, height, preset);
+  const fontSize = Math.round(Number(preset.fontSize || 56) * scale * dimensionScale);
+  const outlineWidth = preset.boxEnabled
+    ? clampNumber(preset.boxPadding, 8, 0, 30) * dimensionScale
+    : clampNumber(preset.strokeWidth, 6, 0, 24) * dimensionScale;
+  const letterSpacing = clampNumber(preset.letterSpacing, 0, -4, 20) * dimensionScale;
   const marginV = Math.round(height * 0.13);
   const borderStyle = preset.boxEnabled ? 3 : 1;
-  const shadowSize = preset.shadowEnabled === false ? 0 : 3;
+  const shadowSize = preset.shadowEnabled === false ? 0 : clampNumber(preset.shadowDistance, 4, 0, 40) * dimensionScale;
+  const bold = resolvedFont.bold;
+  const italic = resolvedFont.italic;
+  const underline = preset.underlineEnabled ? 1 : 0;
   const dialogueTag = captionDialogueTag(preset, width, height, { stable: true });
   const syncOffsetSeconds = clampNumber(Number(preset.syncOffsetMs || 0) / 1000, 0, -0.35, 0.35);
   const holdAfterLastWordSeconds = clampNumber(preset.holdAfterLastWordSeconds, 1.5, 0, 4);
@@ -1155,7 +1524,7 @@ function buildKaraokeAss(captions, preset, width, height) {
     "",
     "[V4+ Styles]",
     "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-    `Style: Capiton,${font},${fontSize},${primary},${primary},${outline},${back},1,0,0,0,100,100,${letterSpacing},0,${borderStyle},${outlineWidth},${shadowSize},2,80,80,${marginV},1`,
+    `Style: Capiton,${font},${fontSize},${primary},${primary},${outline},${back},${bold},${italic},${underline},0,100,100,${letterSpacing},0,${borderStyle},${outlineWidth},${shadowSize},2,80,80,${marginV},1`,
     "",
     "[Events]",
     "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"
@@ -1192,7 +1561,13 @@ function buildKaraokeAss(captions, preset, width, height) {
           if (!clean) {
             return "";
           }
-          return wordIndex === index ? `{\\c${active}}${clean}{\\c${normal}}` : clean;
+          if (wordIndex === index) {
+            return `{\\c${active}}${clean}{\\c${normal}}`;
+          }
+          if (preset.pastTextEnabled && wordIndex < index) {
+            return `{\\c${past}}${clean}{\\c${normal}}`;
+          }
+          return clean;
         })
         .filter(Boolean)
         .join(" ");
@@ -1219,30 +1594,125 @@ function buildKaraokeAss(captions, preset, width, height) {
   return `${lines.join("\n")}\n`;
 }
 
+function buildWatermarkAss(preset, width, height) {
+  const dimensionScale = captionDimensionScale(width, height, preset);
+  const captionFontSize = Math.round(Number(preset.fontSize || 56) * clampNumber(preset.scale, 1, 0.4, 3) * dimensionScale);
+  const watermarkFontSize = Math.max(18, Math.round(captionFontSize * 0.42));
+  const xOffset = clampNumber(preset.positionX, 0, -540, 540) * (width / 1080);
+  const x = Math.round(width / 2 + xOffset);
+  const captionY = Math.round(height * (clampNumber(preset.positionY, 76, 5, 95) / 100));
+  const gap = Math.max(6, Math.round(captionFontSize * 0.13));
+  const y = Math.min(height - watermarkFontSize - 4, captionY + gap);
+
+  return [
+    "[Script Info]",
+    "ScriptType: v4.00+",
+    "WrapStyle: 2",
+    "ScaledBorderAndShadow: yes",
+    `PlayResX: ${width}`,
+    `PlayResY: ${height}`,
+    "",
+    "[V4+ Styles]",
+    "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+    `Style: Watermark,Zilla Slab,${watermarkFontSize},&H00ffffff,&H00ffffff,&HFF000000,&HFF000000,0,0,0,0,100,100,0,0,1,0,0,8,0,0,0,1`,
+    "",
+    "[Events]",
+    "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+    `Dialogue: 0,0:00:00.00,0:00:01.00,Watermark,,0,0,0,,{\\an8\\pos(${x},${y})}@esrarengizbiolay`,
+    ""
+  ].join("\n");
+}
+
+function resolveAssFontFamily(value) {
+  const font = String(value || "").trim();
+  const bundledAliases = {
+    "arboria-bold": "Arboria",
+    "montserrat-black": "Montserrat",
+    "unbounded-medium": "Unbounded",
+    "zillaslab-regular": "Zilla Slab"
+  };
+  return bundledAliases[font.toLowerCase()] || font || "Arial";
+}
+
+function resolveAssFontStyle(value, weight, italicEnabled) {
+  const source = String(value || "").trim();
+  const normalized = source.toLowerCase();
+  const numericWeight = clampNumber(weight, 400, 100, 900);
+  let family = resolveAssFontFamily(source);
+  let bold = numericWeight >= 600 ? 1 : 0;
+
+  if (normalized === "zillaslab-regular" || normalized === "zilla slab") {
+    bold = 0;
+    if (numericWeight <= 350) {
+      family = "Zilla Slab Light";
+    } else if (numericWeight <= 450) {
+      family = "Zilla Slab";
+    } else if (numericWeight <= 550) {
+      family = "Zilla Slab Medium";
+    } else if (numericWeight <= 650) {
+      family = "Zilla Slab SemiBold";
+    } else {
+      family = "Zilla Slab";
+      bold = 1;
+    }
+  }
+
+  return {
+    family,
+    bold,
+    italic: italicEnabled ? 1 : 0
+  };
+}
+
 function captionDialogueTag(preset, width, height, options) {
   const animation = String(preset.animation || "pop");
-  const x = Math.round(width / 2 + clampNumber(preset.positionX, 0, -width / 2, width / 2));
+  const xOffset = clampNumber(preset.positionX, 0, -540, 540) * (width / 1080);
+  const x = Math.round(width / 2 + xOffset);
   const y = Math.round(height * (clampNumber(preset.positionY, 76, 5, 95) / 100));
   const travel = Math.round(height * 0.045);
+  const appearance = captionAppearanceTags(preset);
 
   if (options && options.stable) {
-    return `{\\an2\\pos(${x},${y})}`;
+    return `{\\an2\\pos(${x},${y})${appearance}}`;
   }
 
   if (animation === "none") {
-    return `{\\an2\\pos(${x},${y})}`;
+    return `{\\an2\\pos(${x},${y})${appearance}}`;
   }
 
   if (animation === "fade") {
-    return `{\\an2\\pos(${x},${y})\\fad(130,130)}`;
+    return `{\\an2\\pos(${x},${y})${appearance}\\fad(130,130)}`;
   }
   if (animation === "slide-up") {
-    return `{\\an2\\move(${x},${y + travel},${x},${y},0,180)\\fad(70,120)}`;
+    return `{\\an2\\move(${x},${y + travel},${x},${y},0,180)${appearance}\\fad(70,120)}`;
   }
   if (animation === "pop" || animation === "karaoke") {
-    return `{\\an2\\pos(${x},${y})\\fad(40,80)\\fscx92\\fscy92\\t(0,120,\\fscx108\\fscy108)\\t(120,220,\\fscx100\\fscy100)}`;
+    return `{\\an2\\pos(${x},${y})${appearance}\\fad(40,80)\\fscx92\\fscy92\\t(0,120,\\fscx108\\fscy108)\\t(120,220,\\fscx100\\fscy100)}`;
   }
-  return `{\\an2\\pos(${x},${y})}`;
+  return `{\\an2\\pos(${x},${y})${appearance}}`;
+}
+
+function captionAppearanceTags(preset) {
+  if (!preset || preset.shadowEnabled === false || preset.boxEnabled) {
+    return "";
+  }
+  const distance = clampNumber(preset.shadowDistance, 4, 0, 40);
+  const rawDirection = Number(preset.shadowDirection);
+  const normalizedDirection = Number.isFinite(rawDirection) ? ((rawDirection % 360) + 360) % 360 : 135;
+  const direction = (normalizedDirection * Math.PI) / 180;
+  const xShadow = Math.round(Math.cos(direction) * distance * 10) / 10;
+  const yShadow = Math.round(Math.sin(direction) * distance * 10) / 10;
+  const blur = clampNumber(preset.shadowBlur, 2, 0, 100);
+  return `\\xshad${xShadow}\\yshad${yShadow}\\blur${blur}`;
+}
+
+function captionDimensionScale(width, height, preset) {
+  const referenceWidth = clampNumber(preset && preset.templateReferenceWidth, 1080, 64, 8192);
+  const referenceHeight = clampNumber(preset && preset.templateReferenceHeight, 1920, 64, 8192);
+  return Math.max(
+    0.1,
+    Math.min(8, Math.min(Number(width || referenceWidth) / referenceWidth, Number(height || referenceHeight) / referenceHeight))
+  );
 }
 
 function clampNumber(value, fallback, min, max) {
@@ -1341,6 +1811,14 @@ function assColor(hex, alpha) {
   return `&H${alpha || "00"}${bb}${gg}${rr}`;
 }
 
+function assAlphaFromOpacity(value, fallback) {
+  const opacity = clampNumber(value, fallback, 0, 100) / 100;
+  return Math.round((1 - opacity) * 255)
+    .toString(16)
+    .padStart(2, "0")
+    .toUpperCase();
+}
+
 function assInlineColor(hex) {
   const match = String(hex || "#ffffff").match(/^#?([0-9a-fA-F]{6})$/);
   const value = match ? match[1] : "ffffff";
@@ -1395,6 +1873,105 @@ function findOnPath(name) {
   return "";
 }
 
+function buildAudioExtractionArgs(mediaPath, trimStartSeconds, trimDurationSeconds, audioPath, fallback) {
+  const args = ["-y", "-nostdin", "-hide_banner", "-loglevel", fallback ? "warning" : "error"];
+  if (fallback) {
+    args.push("-fflags", "+genpts+discardcorrupt", "-err_detect", "ignore_err", "-i", mediaPath);
+    if (trimStartSeconds > 0) {
+      args.push("-ss", String(trimStartSeconds));
+    }
+  } else {
+    if (trimStartSeconds > 0) {
+      args.push("-ss", String(trimStartSeconds));
+    }
+    args.push("-i", mediaPath);
+  }
+  if (trimDurationSeconds > 0) {
+    args.push("-t", String(trimDurationSeconds));
+  }
+  args.push("-map", "0:a:0", "-vn", "-ac", "1", "-ar", "16000");
+  if (!fallback) {
+    args.push("-af", "highpass=f=70,lowpass=f=7600,dynaudnorm=f=250:g=15:p=0.9");
+  }
+  args.push("-c:a", "pcm_s16le", audioPath);
+  return args;
+}
+
+async function extractAudioWithFallback(ffmpeg, mediaPath, trimStartSeconds, trimDurationSeconds, audioPath) {
+  let primaryError = null;
+  try {
+    await run(ffmpeg, buildAudioExtractionArgs(mediaPath, trimStartSeconds, trimDurationSeconds, audioPath, false));
+    if (fs.existsSync(audioPath) && fs.statSync(audioPath).size > 44) {
+      return { fallbackUsed: false };
+    }
+    primaryError = new Error("FFmpeg ses dosyası oluşturdu ancak çıktı boş kaldı.");
+  } catch (error) {
+    primaryError = error;
+  }
+
+  try {
+    await run(ffmpeg, buildAudioExtractionArgs(mediaPath, trimStartSeconds, trimDurationSeconds, audioPath, true));
+    if (!fs.existsSync(audioPath) || fs.statSync(audioPath).size <= 44) {
+      throw new Error("FFmpeg yedek yöntemde de boş ses çıktısı oluşturdu.");
+    }
+    return { fallbackUsed: true };
+  } catch (fallbackError) {
+    fallbackError.primaryError = primaryError;
+    throw fallbackError;
+  }
+}
+
+function meaningfulFfmpegLines(value) {
+  const ignored = /^(ffmpeg version|built with|configuration:|libav\w+\s+\d|\s*$)/i;
+  return String(value || "")
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line && !ignored.test(line) && !/^\s*[a-z]+\s+\d+\.\s*\d+/i.test(line));
+}
+
+function summarizeFfmpegError(error) {
+  const fallbackLines = meaningfulFfmpegLines(error && error.stderr);
+  const primaryLines = meaningfulFfmpegLines(error && error.primaryError && error.primaryError.stderr);
+  const lines = fallbackLines.length ? fallbackLines : primaryLines;
+  if (lines.length) {
+    return lines.slice(-4).join(" | ").slice(-1200);
+  }
+  return String((error && error.message) || error || "Bilinmeyen FFmpeg hatası").replace(/^ffmpeg failed \([^)]*\):\s*/i, "").slice(-1200);
+}
+
+function describeFfmpegFailure(error, mediaPath) {
+  const detail = summarizeFfmpegError(error);
+  const normalized = detail.toLowerCase();
+  let reason = "Videonun ses kanalı okunamadı.";
+  if (/permission denied|operation not permitted|not authorized/.test(normalized)) {
+    reason = "Video dosyasına erişim izni yok.";
+  } else if (/no such file|not found|does not exist/.test(normalized)) {
+    reason = "Video dosyası taşınmış, çevrimdışı veya harici disk bağlı değil.";
+  } else if (/does not contain any stream|stream map.*matches no streams|audio.*not found|no audio/.test(normalized)) {
+    reason = "Seçilen klipte okunabilir bir ses kanalı bulunamadı.";
+  } else if (/no space left|disk full/.test(normalized)) {
+    reason = "Diskte ses dosyası oluşturacak boş alan kalmadı.";
+  } else if (/invalid data|moov atom not found|corrupt|error while decoding/.test(normalized)) {
+    reason = "Video dosyası eksik, bozuk veya codec'i okunamıyor.";
+  }
+  return `${reason} Medyayı Premiere'de oynatabildiğini ve dosyanın online olduğunu kontrol et. Teknik ayrıntı: ${detail} | Dosya: ${mediaPath}`;
+}
+
+function writeLastFfmpegError(error, mediaPath) {
+  try {
+    const content = [
+      new Date().toISOString(),
+      `Media: ${mediaPath}`,
+      `Error: ${(error && error.message) || error || ""}`,
+      `stderr:\n${(error && error.stderr) || ""}`,
+      `primary stderr:\n${(error && error.primaryError && error.primaryError.stderr) || ""}`,
+      ""
+    ].join("\n");
+    fs.writeFileSync(path.join(WORK_DIR, "last-ffmpeg-error.log"), content, "utf8");
+  } catch (writeError) {}
+}
+
 function run(command, args) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
@@ -1403,9 +1980,37 @@ function run(command, args) {
       stderr += chunk.toString();
     });
     child.on("error", reject);
-    child.on("close", (code) => {
+    child.on("close", (code, signal) => {
       if (code === 0) {
         resolve();
+        return;
+      }
+      const error = new Error(`${path.basename(command)} failed (${code == null ? signal || "unknown" : code}): ${stderr.slice(-4000)}`);
+      error.exitCode = code;
+      error.signal = signal;
+      error.stderr = stderr;
+      error.command = command;
+      error.args = args;
+      reject(error);
+    });
+  });
+}
+
+function runCapture(command, args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0) {
+        resolve(stdout);
         return;
       }
       reject(new Error(`${path.basename(command)} failed (${code}): ${stderr.slice(-2000)}`));
@@ -1413,20 +2018,209 @@ function run(command, args) {
   });
 }
 
-function readJson(req) {
+async function listSystemFonts(options) {
+  const force = !!(options && options.force);
+  const cacheAge = Date.now() - systemFontCache.loadedAt;
+  if (!force && systemFontCache.result && cacheAge < 10 * 60 * 1000) {
+    return systemFontCache.result;
+  }
+
+  try {
+    let faces = [];
+    // system_profiler regularly takes 15-25 seconds on font-heavy Macs.
+    // Directory discovery is effectively instant and includes user fonts,
+    // system fonts, and the exact font files shipped with Zola.
+    faces = fallbackFontFaces().concat(bundledFontFaces());
+
+    const fonts = Array.from(
+      new Set(
+        faces
+          .reduce((values, face) => values.concat([face.family, face.fullName, face.postscriptName]), [])
+          .map(cleanFontName)
+          .filter(isPublicFontName)
+      )
+    ).sort(compareFontNames);
+    const result = { ok: true, fonts, faces };
+    systemFontCache = { loadedAt: Date.now(), result };
+    return result;
+  } catch (error) {
+    const faces = fallbackFontFaces().concat(bundledFontFaces());
+    const fonts = Array.from(
+      new Set(faces.reduce((values, face) => values.concat([face.family, face.fullName, face.postscriptName]), []).filter(Boolean))
+    ).sort(compareFontNames);
+    const result = {
+      ok: fonts.length > 0,
+      fonts,
+      faces,
+      warning: error.message || String(error)
+    };
+    systemFontCache = { loadedAt: Date.now(), result };
+    return result;
+  }
+}
+
+function extractMacFontFaces(payload) {
+  const items = Array.isArray(payload && payload.SPFontsDataType) ? payload.SPFontsDataType : [];
+  const faces = [];
+  for (const item of items) {
+    if (!item || item.enabled === "no" || item.valid === "no") {
+      continue;
+    }
+    const typefaces = Array.isArray(item.typefaces) ? item.typefaces : [];
+    for (const typeface of typefaces) {
+      if (!typeface || typeface.enabled === "no" || typeface.valid === "no" || typeface.duplicate === "yes") {
+        continue;
+      }
+      const family = cleanFontName(typeface.family || typeface.fullname || typeface._name);
+      const fullName = cleanFontName(typeface.fullname || typeface._name || family);
+      if (!family && !fullName) {
+        continue;
+      }
+      if (!isPublicFontName(family) || !isPublicFontName(fullName)) {
+        continue;
+      }
+      faces.push({
+        family,
+        fullName,
+        postscriptName: cleanFontName(typeface._name),
+        style: String(typeface.style || "").trim(),
+        path: String(item.path || "").trim()
+      });
+    }
+  }
+
+  const unique = new Map();
+  for (const face of faces) {
+    const key = [face.family, face.fullName, face.postscriptName].join("\u0000").toLocaleLowerCase();
+    if (!unique.has(key)) {
+      unique.set(key, face);
+    }
+  }
+  return Array.from(unique.values()).sort((left, right) =>
+    compareFontNames(`${left.family} ${left.style}`, `${right.family} ${right.style}`)
+  );
+}
+
+function fallbackFontFaces() {
+  const directories =
+    os.platform() === "win32"
+      ? [path.join(process.env.WINDIR || "C:\\Windows", "Fonts")]
+      : [path.join(os.homedir(), "Library", "Fonts"), "/Library/Fonts", "/System/Library/Fonts", "/usr/share/fonts"];
+  const faces = [];
+  const extensions = new Set([".ttf", ".otf", ".ttc"]);
+  for (const directory of directories) {
+    if (!fs.existsSync(directory)) {
+      continue;
+    }
+    let files = [];
+    try {
+      files = fs.readdirSync(directory);
+    } catch (error) {
+      continue;
+    }
+    for (const fileName of files) {
+      if (!extensions.has(path.extname(fileName).toLowerCase())) {
+        continue;
+      }
+      const postscriptName = path.basename(fileName, path.extname(fileName)).trim();
+      const family = postscriptName.replace(/[-_]+/g, " ").trim();
+      if (family) {
+        faces.push({ family, fullName: family, postscriptName, style: "", path: path.join(directory, fileName) });
+      }
+    }
+  }
+  return faces;
+}
+
+function bundledFontFaces() {
+  const directory = path.join(ROOT, "fonts");
+  if (!fs.existsSync(directory)) {
+    return [];
+  }
+  const extensions = new Set([".ttf", ".otf", ".ttc"]);
+  return fs.readdirSync(directory)
+    .filter((fileName) => extensions.has(path.extname(fileName).toLowerCase()))
+    .map((fileName) => {
+      const postscriptName = path.basename(fileName, path.extname(fileName)).trim();
+      const family = postscriptName.replace(/[-_](Black|Bold|Medium|Regular)$/i, "").replace(/[-_]+/g, " ").trim();
+      return {
+        family: family || postscriptName,
+        fullName: postscriptName.replace(/[-_]+/g, " ").trim(),
+        postscriptName,
+        style: postscriptName.slice((family || postscriptName).length).replace(/^[-_\s]+/, ""),
+        path: path.join(directory, fileName),
+        bundled: true
+      };
+    });
+}
+
+function compareFontNames(left, right) {
+  return String(left || "").localeCompare(String(right || ""), undefined, { sensitivity: "base", numeric: true });
+}
+
+function cleanFontName(value) {
+  return String(value || "")
+    .replace(/[\u202a-\u202e\u2066-\u2069]/g, "")
+    .trim();
+}
+
+function isPublicFontName(value) {
+  const name = cleanFontName(value);
+  return Boolean(name) && name.charAt(0) !== "." && name.charAt(0) !== "_";
+}
+
+function readJson(req, maxBytes = MAX_JSON_BODY_BYTES) {
   return new Promise((resolve, reject) => {
     let raw = "";
+    let byteCount = 0;
+    let settled = false;
+
+    const declaredLength = Number(req.headers && req.headers["content-length"]);
+    if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+      settled = true;
+      reject(httpError(413, "REQUEST_TOO_LARGE", "İstek gövdesi izin verilen boyutu aşıyor."));
+      req.resume();
+      return;
+    }
+
     req.on("data", (chunk) => {
+      if (settled) {
+        return;
+      }
+      byteCount += chunk.length;
+      if (byteCount > maxBytes) {
+        settled = true;
+        reject(httpError(413, "REQUEST_TOO_LARGE", "İstek gövdesi izin verilen boyutu aşıyor."));
+        return;
+      }
       raw += chunk.toString();
     });
     req.on("end", () => {
+      if (settled) {
+        return;
+      }
       try {
+        settled = true;
         resolve(raw ? JSON.parse(raw) : {});
       } catch (error) {
+        settled = true;
+        reject(httpError(400, "INVALID_JSON", "İstek gövdesi geçerli JSON değil."));
+      }
+    });
+    req.on("error", (error) => {
+      if (!settled) {
+        settled = true;
         reject(error);
       }
     });
   });
+}
+
+function httpError(statusCode, code, message) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  error.code = code;
+  return error;
 }
 
 function sendJson(res, status, payload, onFinish) {
@@ -1437,10 +2231,24 @@ function sendJson(res, status, payload, onFinish) {
   res.end(JSON.stringify(payload));
 }
 
-function setCors(res) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
+function setCors(req, res) {
+  const origin = String((req.headers && req.headers.origin) || "");
+  const allowed =
+    !origin ||
+    origin === "null" ||
+    /^file:\/\//i.test(origin) ||
+    /^cep-html-engine:\/\//i.test(origin) ||
+    /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/i.test(origin);
+  if (!allowed) {
+    return false;
+  }
+  if (origin) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+  }
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  return true;
 }
 
 function normalizeLanguage(language) {
@@ -1584,3 +2392,27 @@ function parseTimestamp(value) {
   }
   return Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]) + Number(match[4].padEnd(3, "0")) / 1000;
 }
+
+module.exports = {
+  buildAudioExtractionArgs,
+  buildAss,
+  buildKaraokeAss,
+  buildWatermarkAss,
+  buildOverlayFilterGraph,
+  chunkTranslationTexts,
+  describeFfmpegFailure,
+  formatSrtCaptions,
+  mergeTranscriptionResults,
+  normalizeFileSystemPath,
+  normalizeTranscribedCaptions,
+  normalizeTranscriptText,
+  normalizeTranscriptionClips,
+  extractMacFontFaces,
+  listSystemFonts,
+  parseSrt,
+  parseWhisperWords,
+  resolveAssFontFamily,
+  resolveAssFontStyle,
+  resolveOverlayRenderSize,
+  server
+};

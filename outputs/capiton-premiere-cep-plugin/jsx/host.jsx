@@ -382,9 +382,25 @@ function capitonGetSequenceInfo() {
     }
 
     var sequence = app.project.activeSequence;
+    var settings = null;
+    try {
+      settings = sequence.getSettings ? sequence.getSettings() : null;
+    } catch (settingsError) {}
+    var width = capitonFirstNumber([
+      settings ? capitonSafeNumber(settings, "videoFrameWidth") : 0,
+      settings ? capitonSafeNumber(settings, "frameSizeHorizontal") : 0,
+      capitonSafeNumber(sequence, "frameSizeHorizontal")
+    ]);
+    var height = capitonFirstNumber([
+      settings ? capitonSafeNumber(settings, "videoFrameHeight") : 0,
+      settings ? capitonSafeNumber(settings, "frameSizeVertical") : 0,
+      capitonSafeNumber(sequence, "frameSizeVertical")
+    ]);
     return capitonJson({
       ok: true,
       name: sequence.name || "Aktif sekans",
+      width: width || 1080,
+      height: height || 1920,
       audioTrackCount: sequence.audioTracks ? sequence.audioTracks.numTracks : 0,
       videoTrackCount: sequence.videoTracks ? sequence.videoTracks.numTracks : 0
     });
@@ -413,40 +429,29 @@ function capitonGetAudioSource(trackId) {
       return "{\"ok\":false,\"message\":\"Ses kanalı okunamadı ve zaman çizelgesi medyası bulunamadı.\"}";
     }
 
-    var clips = track.clips;
-    var scanLimit = capitonFirstNumber([
-      capitonSafeNumber(clips, "numItems"),
-      capitonSafeNumber(clips, "length"),
-      256
-    ]);
-
-    for (var i = 0; i < scanLimit; i += 1) {
-      var clip = capitonGetCollectionItem(clips, i);
-      if (!clip || !clip.projectItem) {
-        continue;
-      }
-
-      var mediaPath = "";
-      try {
-        mediaPath = clip.projectItem.getMediaPath();
-      } catch (errorA) {}
-
-      if (!mediaPath) {
-        continue;
+    var readableClips = capitonCollectReadableAudioClips(track);
+    if (readableClips.length > 0) {
+      var firstClip = readableClips[0];
+      var timelineStartSeconds = firstClip.timelineStartSeconds;
+      var timelineEndSeconds = firstClip.timelineEndSeconds;
+      for (var i = 1; i < readableClips.length; i += 1) {
+        timelineStartSeconds = Math.min(timelineStartSeconds, readableClips[i].timelineStartSeconds);
+        timelineEndSeconds = Math.max(timelineEndSeconds, readableClips[i].timelineEndSeconds);
       }
 
       return capitonJson({
         ok: true,
         trackId: trackId,
-        clipIndex: i,
+        clipIndex: firstClip.clipIndex,
         sequenceName: sequence.name || "Aktif sekans",
-        mediaPath: mediaPath,
-        clipName: clip.name || "",
-        timelineStartSeconds: capitonTimeSeconds(clip.start),
-        timelineEndSeconds: capitonTimeSeconds(clip.end),
-        sourceInSeconds: capitonTimeSeconds(clip.inPoint),
-        sourceOutSeconds: capitonTimeSeconds(clip.outPoint),
-        message: trackId + " içindeki medya bulundu: " + mediaPath
+        mediaPath: firstClip.mediaPath,
+        clipName: firstClip.clipName,
+        timelineStartSeconds: timelineStartSeconds,
+        timelineEndSeconds: timelineEndSeconds,
+        sourceInSeconds: firstClip.sourceInSeconds,
+        sourceOutSeconds: firstClip.sourceOutSeconds,
+        clips: readableClips,
+        message: trackId + " içinde " + readableClips.length + " okunabilir ses klibi bulundu."
       });
     }
 
@@ -460,6 +465,50 @@ function capitonGetAudioSource(trackId) {
       message: "Ses kaynağı okunamadı: " + error.toString()
     });
   }
+}
+
+function capitonCollectReadableAudioClips(track) {
+  var result = [];
+  if (!track || !track.clips) {
+    return result;
+  }
+
+  var clips = track.clips;
+  var scanLimit = capitonFirstNumber([
+    capitonSafeNumber(clips, "numItems"),
+    capitonSafeNumber(clips, "length"),
+    256
+  ]);
+
+  for (var i = 0; i < scanLimit; i += 1) {
+    var clip = capitonGetCollectionItem(clips, i);
+    if (!clip || !clip.projectItem) {
+      continue;
+    }
+
+    var mediaPath = "";
+    try {
+      mediaPath = clip.projectItem.getMediaPath();
+    } catch (errorA) {}
+    if (!mediaPath) {
+      continue;
+    }
+
+    result.push({
+      clipIndex: i,
+      mediaPath: mediaPath,
+      clipName: clip.name || "",
+      timelineStartSeconds: capitonTimeSeconds(clip.start),
+      timelineEndSeconds: capitonTimeSeconds(clip.end),
+      sourceInSeconds: capitonTimeSeconds(clip.inPoint),
+      sourceOutSeconds: capitonTimeSeconds(clip.outPoint)
+    });
+  }
+
+  result.sort(function (left, right) {
+    return left.timelineStartSeconds - right.timelineStartSeconds;
+  });
+  return result;
 }
 
 function capitonTrackIdToIndex(trackId) {
@@ -608,6 +657,98 @@ function capitonFindFreeOverlayTrackIndex(sequence, startSeconds, endSeconds) {
   return videoCount;
 }
 
+function capitonIsZolaOverlayPath(mediaPath) {
+  var normalized = String(mediaPath || "").replace(/\\/g, "/").toLowerCase();
+  return /-capiton-overlay(?:-tmp)?\.mov$/.test(normalized);
+}
+
+function capitonFindExistingOverlay(startSeconds, durationSeconds, removeDuplicates) {
+  try {
+    if (!app.project || !app.project.activeSequence) {
+      return capitonJson({ ok: false, mediaPath: "", message: "Aktif sekans bulunamadı." });
+    }
+
+    var sequence = app.project.activeSequence;
+    var rangeStart = Math.max(0, Number(startSeconds || 0));
+    var safeDuration = Math.max(0.04, Number(durationSeconds || 0));
+    var rangeEnd = rangeStart + safeDuration;
+    var matches = [];
+    var trackCount = capitonGetVideoTrackCount(sequence);
+
+    for (var trackIndex = 0; trackIndex < trackCount; trackIndex += 1) {
+      var track = capitonGetCollectionItem(sequence.videoTracks, trackIndex);
+      if (!track || !track.clips) {
+        continue;
+      }
+      var clipCount = capitonFirstNumber([
+        capitonSafeNumber(track.clips, "numItems"),
+        capitonSafeNumber(track.clips, "length")
+      ]);
+      for (var clipIndex = 0; clipIndex < clipCount; clipIndex += 1) {
+        var clip = capitonGetCollectionItem(track.clips, clipIndex);
+        if (!clip || !clip.projectItem) {
+          continue;
+        }
+        var mediaPath = "";
+        try {
+          mediaPath = clip.projectItem.getMediaPath();
+        } catch (pathError) {}
+        if (!capitonIsZolaOverlayPath(mediaPath)) {
+          continue;
+        }
+        var clipStart = capitonTimeSeconds(clip.start);
+        var clipEnd = capitonTimeSeconds(clip.end);
+        if (clipEnd <= rangeStart || clipStart >= rangeEnd) {
+          continue;
+        }
+        matches.push({
+          clip: clip,
+          mediaPath: mediaPath,
+          trackIndex: trackIndex,
+          clipIndex: clipIndex,
+          startSeconds: clipStart,
+          endSeconds: clipEnd
+        });
+      }
+    }
+
+    if (!matches.length) {
+      return capitonJson({ ok: true, found: false, mediaPath: "", removedDuplicates: 0 });
+    }
+
+    matches.sort(function (left, right) {
+      return right.trackIndex - left.trackIndex || right.clipIndex - left.clipIndex;
+    });
+    var keep = matches[0];
+    var removed = 0;
+    if (removeDuplicates && matches.length > 1) {
+      for (var i = 1; i < matches.length; i += 1) {
+        try {
+          if (matches[i].clip.remove) {
+            matches[i].clip.remove(false, false);
+            removed += 1;
+          }
+        } catch (removeError) {}
+      }
+    }
+
+    return capitonJson({
+      ok: true,
+      found: true,
+      mediaPath: keep.mediaPath,
+      trackIndex: keep.trackIndex,
+      startSeconds: keep.startSeconds,
+      endSeconds: keep.endSeconds,
+      removedDuplicates: removed,
+      message: removed
+        ? "Mevcut Zola altyazısı bulundu; yinelenen katmanlar temizlendi."
+        : "Mevcut Zola altyazısı bulundu."
+    });
+  } catch (error) {
+    return capitonJson({ ok: false, mediaPath: "", message: "Mevcut Zola altyazısı aranamadı: " + error.toString() });
+  }
+}
+
 function capitonImportOverlayFile(mediaPath, startSeconds, durationSeconds) {
   try {
     if (!mediaPath) {
@@ -673,6 +814,156 @@ function capitonImportOverlayFile(mediaPath, startSeconds, durationSeconds) {
       ok: false,
       message: "Görsel altyazı içe aktarılamadı: " + error.toString()
     });
+  }
+}
+
+function capitonIsEsrarengizWatermarkPath(mediaPath) {
+  var normalized = String(mediaPath || "").replace(/\\/g, "/").toLowerCase();
+  return /-esrarengiz-watermark\.png$/.test(normalized);
+}
+
+function capitonRemoveWatermarkLayers(startSeconds, durationSeconds) {
+  try {
+    if (!app.project || !app.project.activeSequence) {
+      return capitonJson({ ok: false, removed: 0, message: "Aktif sekans bulunamadı." });
+    }
+
+    var sequence = app.project.activeSequence;
+    var rangeStart = Math.max(0, Number(startSeconds || 0));
+    var rangeEnd = rangeStart + Math.max(0.04, Number(durationSeconds || 0));
+    var removed = 0;
+    var trackCount = capitonGetVideoTrackCount(sequence);
+    for (var trackIndex = 0; trackIndex < trackCount; trackIndex += 1) {
+      var track = capitonGetCollectionItem(sequence.videoTracks, trackIndex);
+      if (!track || !track.clips) {
+        continue;
+      }
+      var clipCount = capitonFirstNumber([
+        capitonSafeNumber(track.clips, "numItems"),
+        capitonSafeNumber(track.clips, "length")
+      ]);
+      for (var clipIndex = clipCount - 1; clipIndex >= 0; clipIndex -= 1) {
+        var clip = capitonGetCollectionItem(track.clips, clipIndex);
+        var clipPath = "";
+        try {
+          clipPath = clip && clip.projectItem ? clip.projectItem.getMediaPath() : "";
+        } catch (pathError) {}
+        if (!capitonIsEsrarengizWatermarkPath(clipPath)) {
+          continue;
+        }
+        var clipStart = capitonTimeSeconds(clip.start);
+        var clipEnd = capitonTimeSeconds(clip.end);
+        if (clipEnd <= rangeStart || clipStart >= rangeEnd) {
+          continue;
+        }
+        try {
+          if (clip.remove) {
+            clip.remove(false, false);
+            removed += 1;
+          }
+        } catch (removeError) {}
+      }
+    }
+
+    return capitonJson({
+      ok: true,
+      removed: removed,
+      message: removed ? "Eski @esrarengizbiolay watermark katmanı yenilendi." : "Watermark katmanı kapalı."
+    });
+  } catch (error) {
+    return capitonJson({ ok: false, removed: 0, message: "Watermark katmanı temizlenemedi: " + error.toString() });
+  }
+}
+
+function capitonSetTrackItemOpacity(clip, opacity) {
+  try {
+    if (!clip || !clip.components) {
+      return false;
+    }
+    var componentCount = capitonFirstNumber([
+      capitonSafeNumber(clip.components, "numItems"),
+      capitonSafeNumber(clip.components, "length")
+    ]);
+    for (var componentIndex = 0; componentIndex < componentCount; componentIndex += 1) {
+      var component = capitonGetCollectionItem(clip.components, componentIndex);
+      if (component && component.properties && capitonSetNumberParam(component.properties, ["Opacity", "Opaklık"], Number(opacity))) {
+        return true;
+      }
+    }
+  } catch (error) {}
+  return false;
+}
+
+function capitonImportWatermarkFile(mediaPath, startSeconds, durationSeconds, opacity) {
+  try {
+    if (!mediaPath) {
+      return capitonJson({ ok: false, message: "Watermark dosya yolu boş." });
+    }
+    if (!app.project || !app.project.activeSequence) {
+      return capitonJson({ ok: false, message: "Aktif sekans bulunamadı." });
+    }
+
+    var safeStart = Math.max(0, Number(startSeconds || 0));
+    var safeDuration = Math.max(0.2, Number(durationSeconds || 0.2));
+    capitonRemoveWatermarkLayers(safeStart, safeDuration);
+
+    var imported = app.project.importFiles([mediaPath], true, app.project.rootItem, false);
+    var item = capitonFindProjectItemByMediaPath(app.project.rootItem, mediaPath);
+    if (!imported || !item) {
+      return capitonJson({ ok: false, message: "@esrarengizbiolay watermark dosyası projeye alınamadı." });
+    }
+    try {
+      item.name = "@esrarengizbiolay watermark";
+    } catch (nameError) {}
+
+    var sequence = app.project.activeSequence;
+    var trackIndex = capitonFindFreeOverlayTrackIndex(sequence, safeStart, safeStart + safeDuration);
+    var track = capitonGetCollectionItem(sequence.videoTracks, trackIndex);
+    if (!track || !track.overwriteClip) {
+      return capitonJson({ ok: false, message: "Watermark için boş video kanalı oluşturulamadı." });
+    }
+    track.overwriteClip(item, safeStart);
+
+    var insertedClip = null;
+    var clipCount = capitonFirstNumber([
+      capitonSafeNumber(track.clips, "numItems"),
+      capitonSafeNumber(track.clips, "length")
+    ]);
+    for (var clipIndex = clipCount - 1; clipIndex >= 0; clipIndex -= 1) {
+      var candidate = capitonGetCollectionItem(track.clips, clipIndex);
+      var candidatePath = "";
+      try {
+        candidatePath = candidate && candidate.projectItem ? candidate.projectItem.getMediaPath() : "";
+      } catch (pathError) {}
+      if (String(candidatePath || "") === String(mediaPath) && Math.abs(capitonTimeSeconds(candidate.start) - safeStart) < 0.08) {
+        insertedClip = candidate;
+        break;
+      }
+    }
+
+    var durationSet = false;
+    var opacitySet = false;
+    if (insertedClip) {
+      try {
+        insertedClip.end = capitonCreateTimeFromSeconds(safeStart + safeDuration);
+        durationSet = true;
+      } catch (durationError) {}
+      opacitySet = capitonSetTrackItemOpacity(insertedClip, Number(opacity || 20));
+    }
+
+    return capitonJson({
+      ok: true,
+      imported: true,
+      addedToTimeline: true,
+      mediaPath: mediaPath,
+      trackIndex: trackIndex,
+      durationSet: durationSet,
+      opacitySet: opacitySet,
+      opacity: Number(opacity || 20),
+      message: "@esrarengizbiolay ayrı watermark katmanı olarak eklendi (%20 opacity)."
+    });
+  } catch (error) {
+    return capitonJson({ ok: false, message: "Watermark timeline'a eklenemedi: " + error.toString() });
   }
 }
 
@@ -743,48 +1034,106 @@ function capitonReplaceOverlayFile(previousMediaPath, nextMediaPath, fallbackSta
       return capitonJson({ ok: false, message: "Aktif proje bulunamadı." });
     }
 
-    var item = capitonFindProjectItemByMediaPath(app.project.rootItem, previousMediaPath);
-    if (!item) {
+    var sequence = app.project.activeSequence;
+    var previousItem = capitonFindProjectItemByMediaPath(app.project.rootItem, previousMediaPath);
+    var imported = app.project.importFiles([nextMediaPath], true, app.project.rootItem, false);
+    var nextItem = capitonFindProjectItemByMediaPath(app.project.rootItem, nextMediaPath);
+    if (!imported || !nextItem) {
+      return capitonJson({
+        ok: false,
+        replaced: false,
+        mediaPath: nextMediaPath,
+        message: "Yeni Zola render dosyası projeye alınamadı; mevcut timeline klibi korunuyor."
+      });
+    }
+    var locations = [];
+    if (sequence && sequence.videoTracks) {
+      var trackCount = capitonGetVideoTrackCount(sequence);
+      for (var trackIndex = 0; trackIndex < trackCount; trackIndex += 1) {
+        var track = capitonGetCollectionItem(sequence.videoTracks, trackIndex);
+        if (!track || !track.clips) {
+          continue;
+        }
+        var clipCount = capitonFirstNumber([
+          capitonSafeNumber(track.clips, "numItems"),
+          capitonSafeNumber(track.clips, "length")
+        ]);
+        for (var clipIndex = clipCount - 1; clipIndex >= 0; clipIndex -= 1) {
+          var clip = capitonGetCollectionItem(track.clips, clipIndex);
+          var clipPath = "";
+          try {
+            clipPath = clip && clip.projectItem ? clip.projectItem.getMediaPath() : "";
+          } catch (pathError) {}
+          if (String(clipPath || "") !== String(previousMediaPath || "")) {
+            continue;
+          }
+          locations.push({
+            trackIndex: trackIndex,
+            startSeconds: capitonTimeSeconds(clip.start),
+            endSeconds: capitonTimeSeconds(clip.end)
+          });
+          try {
+            if (clip.remove) {
+              clip.remove(false, false);
+            }
+          } catch (removeError) {}
+        }
+      }
+    }
+
+    var replaced = false;
+    var targetTrackIndex = locations.length ? locations[0].trackIndex : -1;
+    var targetStartSeconds = locations.length
+      ? locations[0].startSeconds
+      : Math.max(0, Number(fallbackStartSeconds || 0));
+
+    if (nextItem && sequence && sequence.videoTracks) {
+      if (targetTrackIndex < 0) {
+        var fallbackDuration = Math.max(0.04, Number(fallbackDurationSeconds || 0));
+        targetTrackIndex = capitonFindFreeOverlayTrackIndex(sequence, targetStartSeconds, targetStartSeconds + fallbackDuration);
+      }
+      var targetTrack = capitonGetCollectionItem(sequence.videoTracks, targetTrackIndex);
+      if (targetTrack && targetTrack.overwriteClip) {
+        try {
+          targetTrack.overwriteClip(nextItem, targetStartSeconds);
+          replaced = true;
+        } catch (overwriteError) {}
+      }
+    }
+
+    if (!replaced && previousItem && locations.length) {
+      for (var restoreIndex = 0; restoreIndex < locations.length; restoreIndex += 1) {
+        try {
+          var restoreTrack = capitonGetCollectionItem(sequence.videoTracks, locations[restoreIndex].trackIndex);
+          if (restoreTrack && restoreTrack.overwriteClip) {
+            restoreTrack.overwriteClip(previousItem, locations[restoreIndex].startSeconds);
+          }
+        } catch (restoreError) {}
+      }
+    }
+
+    if (!replaced && !locations.length) {
       var importedResult = capitonImportOverlayFile(nextMediaPath, fallbackStartSeconds, fallbackDurationSeconds);
       try {
         var parsed = JSON.parse(importedResult);
         parsed.replaced = false;
-        parsed.message = "Eski görsel altyazı proje öğesi bulunamadı; yeni altyazı zaman çizelgesine tekrar eklendi.";
+        parsed.message = "Eski Zola klibi bulunamadı; yeni altyazı zaman çizelgesine eklendi.";
         return capitonJson(parsed);
       } catch (parseError) {
         return importedResult;
       }
     }
 
-    var replaced = false;
-    try {
-      if (item.changeMediaPath) {
-        item.changeMediaPath(nextMediaPath, true);
-        replaced = true;
-      }
-    } catch (changeErrorA) {
-      try {
-        item.changeMediaPath(nextMediaPath, 1);
-        replaced = true;
-      } catch (changeErrorB) {}
-    }
-
-    if (replaced) {
-      try {
-        if (item.refreshMedia) {
-          item.refreshMedia();
-        }
-      } catch (refreshError) {}
-    }
-
     return capitonJson({
-      ok: replaced,
+      ok: !!imported && replaced,
       replaced: replaced,
       previousMediaPath: previousMediaPath,
       mediaPath: nextMediaPath,
+      trackIndex: targetTrackIndex,
+      startSeconds: targetStartSeconds,
       message: replaced
-        ? "Zaman çizelgesindeki mevcut görsel altyazı yeni render dosyasına bağlandı."
-        : "Görsel altyazı proje öğesi bulundu ama yeni dosyaya bağlanamadı."
+        ? "Zola altyazısı aynı video kanalında doğru sekans çözünürlüğüyle yenilendi."
+        : "Zola altyazı klibi kaldırıldı ancak yeni render aynı kanala yerleştirilemedi."
     });
   } catch (error) {
     return capitonJson({
